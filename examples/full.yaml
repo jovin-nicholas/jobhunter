@@ -1,0 +1,77 @@
+# A full example: a new-grad software search across every built-in board, with filters and thresholds.
+# A fuller example than jobhunter.example.yaml; every option is described in docs/settings.md.
+# Secrets (webhooks, passwords, API keys) go in .env; this file only names the environment variables.
+
+resumes:
+  folder: resumes/
+  default: backend.txt                  # .txt, .md, .pdf or .docx
+  versions:                             # optional: used when a job mentions more of these words
+    fullstack.txt:
+      keywords: [react, reactjs, next.js, nextjs, frontend, front end, full stack, fullstack,
+                 typescript, node, node.js, nodejs]
+  # names: [John Doe]                   # optional; otherwise read from the default resume's first line
+
+search:
+  queries: [software engineer generalist, SDE new grad, full stack engineer, backend engineer,
+            platform engineer, data engineer, AI engineer]
+  locations: [United States, "Austin, TX", "Chicago, IL", "New York, NY", Remote]
+  max_age_hours: 72
+  fetch_descriptions: true              # fetch the posting page when a board gives no description (LinkedIn, Hyde Park)
+
+boards:                                 # built-in boards, or the name of a file in plugins/
+  dice: {}
+  linkedin: {timeout_s: 1200}           # needs Node.js (npx); one search per query and location, 5 s apart
+  industry_jobs: {}                     # dev.to #jobs and #hiring posts
+  top_companies: {}                     # Amazon, plus SoFi and Stripe on Greenhouse
+  hydepark: {}                          # Hyde Park Venture Partners portfolio jobs
+  # ATS boards: `discover: true` reads postings found by discovery (below); `companies` lists whole boards,
+  # e.g. greenhouse: {companies: [stripe, airbnb], discover: true}. Workday, Dover, ADP and Gem only discover.
+  greenhouse: {discover: true, timeout_s: 1800}
+  lever: {discover: true}
+  ashby: {discover: true}
+  workday: {discover: true, timeout_s: 1800}
+  dover: {discover: true}
+  adp: {discover: true}
+  gem: {discover: true}
+
+discovery:                              # links to ATS postings, fetched once per run
+  github_readmes:                       # public job lists (free)
+    - https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/README.md
+    - https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md
+    - https://raw.githubusercontent.com/pittcsc/Summer2025-Internships/dev/README.md
+  # google: {api_key_env: GOOGLE_API_KEY, cx_env: GOOGLE_CX}   # optional: Google Custom Search, 100 free queries a day
+
+filters:                                # run before any model, in this order
+  location:
+    countries: [US]
+  seniority:
+    levels: [intern, entry, mid, senior]   # intern | entry | mid | senior | staff
+    max_years_required: 3
+  keywords:                             # whole words and phrases, case-insensitive
+    exclude_title: [principal, lead, staff, manager, director, vp, head, embedded, hardware, firmware,
+                    scientist, ml engineer]
+    exclude_phrases: [security clearance, ts/sci, top secret, polygraph, background investigation,
+                      us citizen, u.s. citizen, us citizenship, citizenship required, us person required]
+    exclude_companies: [lensa, beaconfire, dataannotation, speechify, revature, bairesdev, turing,
+                        crossover, epictura, fdny, outlier, capital placement]
+    exclude_roles:                      # skip when at least min_matches different terms appear
+      embedded: {terms: [c++, rtos, firmware, microcontroller, fpga, verilog, bare metal], min_matches: 2}
+
+scorers:                                # tried in order; errors and rate limits fall through to the next
+  - laya: {model: ~/models/laya_finetuned}   # the fine-tuned folder from Colab, or convaiinnovations/laya
+  - ollama: {model: "gemma4:e4b"}             # local; needs `ollama serve`
+  # Optional cloud fallbacks (free tiers; keys in .env, comma-separated to rotate on rate limits):
+  # - gemini: {model: gemini-3.5-flash-lite, api_keys_env: GEMINI_API_KEYS}
+  # - groq: {model: openai/gpt-oss-120b, api_keys_env: GROQ_API_KEYS}
+
+cover_letters:                          # a draft letter in each notification, written by a text model
+  enabled: false
+  writer: ollama                        # ollama, gemini or groq (must be listed under scorers)
+
+decisions:
+  notify_at: 7                          # score >= 7 -> notify
+  log_at: 5                             # score 5-6 -> log; below 5 -> skip
+
+# notify:
+#   slack: {webhook_env: SLACK_WEBHOOK_URL}
+#   email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD, to_env: NOTIFY_EMAIL}

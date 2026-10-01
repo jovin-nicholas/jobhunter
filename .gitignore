@@ -1,0 +1,11 @@
+.env
+jobhunter.yaml
+data/
+resumes/*
+!resumes/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+logs/
+.superpowers/

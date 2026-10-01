@@ -1,0 +1,29 @@
+# jobhunter settings: only the choices you have to make. Everything else has a default (docs/settings.md).
+# Copy to jobhunter.yaml, put your resume in resumes/, then run: .venv/bin/python -m jobhunter check-config
+
+resumes:
+  default: resume.pdf                   # in resumes/: .pdf, .docx, .txt or .md
+  # versions:                           # optional: other resumes, used when a job mentions more of their keywords
+  #   frontend.pdf: {keywords: [react, next.js, typescript, frontend]}
+
+search:                                 # what to look for, and where
+  queries: [software engineer, backend engineer, full stack engineer]
+  locations: [United States, Remote]
+
+filters:                                # applied before any model scores a job
+  location: {countries: [US]}
+  seniority: {levels: [intern, entry, mid], max_years_required: 3}   # also: senior, staff
+  keywords:
+    exclude_title: [principal, staff, lead, manager, director]
+    exclude_phrases: [security clearance, us citizen]
+
+scorers:                                # tried in order until one answers
+  - laya: {model: ~/models/laya_finetuned}   # your fine-tuned Laya folder (README: Laya)
+  - ollama: {model: "gemma4:e4b"}             # local fallback; needs `ollama serve`
+
+# Optional (examples; leave them out for the defaults):
+# boards: [dice, linkedin, greenhouse, lever, ashby, workday]   # default: all 12 built-in boards
+# schedule: {every: 30m, quiet_hours: "22:00-07:00"}           # default: every 1h, no quiet time
+# notify:                               # secrets stay in .env; name the variables here
+#   slack: {webhook_env: SLACK_WEBHOOK_URL}
+#   email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD, to_env: NOTIFY_EMAIL}
