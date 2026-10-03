@@ -114,12 +114,22 @@ class LayaScorer:
 
     def check(self) -> str | None:
         """For check-config: why Laya cannot run yet, or None. A Hugging Face id is downloaded on first use."""
-        if importlib.util.find_spec("laya") is None:
-            return "the laya package is not installed; run `.venv/bin/pip install -r requirements-laya.txt`"
+        if importlib.util.find_spec("laya") is None or importlib.util.find_spec("torch") is None:
+            return "the laya package or PyTorch is not installed; run `.venv/bin/pip install -r requirements-laya.txt`"
         if _is_folder(self.options.model) and not os.path.isdir(self.model):
             return (f"model folder {self.model} not found; use a Hugging Face id such as convaiinnovations/laya "
                     "(downloaded on the first run) or the folder of a fine-tuned Laya")
         return None
+
+    def download_note(self) -> str | None:
+        """For check-config: a Hugging Face id not downloaded yet, which may also be a mistyped folder."""
+        if _is_folder(self.options.model):
+            return None
+        hub = Path(os.environ.get("HF_HUB_CACHE") or Path(os.environ.get("HF_HOME") or Path.home() / ".cache/huggingface") / "hub")
+        if (hub / ("models--" + self.options.model.replace("/", "--"))).is_dir():
+            return None
+        return (f"laya: {self.options.model} is not downloaded yet; it is fetched from Hugging Face on the first run. "
+                "If you meant a folder on this computer, that folder does not exist")
 
     def _get_agent(self) -> Any:
         # Loading takes seconds and ~1 GB; do it once per run, and after a failure fail fast on every later job.

@@ -13,6 +13,17 @@ from jobhunter.registry import scorer
 from jobhunter.scorers.prompt import build_prompt, parse_json, to_result
 
 _INLINE_THINKING = re.compile(r"^\s*<think>.*?</think>\s*", re.S)
+
+
+def _without_reasoning(text: str) -> str:
+    """The answer without reasoning a model wrote inline instead of in Ollama's separate thinking field."""
+    text = _INLINE_THINKING.sub("", text)
+    if "</think>" in text and "<think>" not in text.split("</think>", 1)[0]:
+        # Templates that put <think> in the prompt leave only the closing tag in the reply.
+        return text.rsplit("</think>", 1)[1].lstrip()
+    if text.lstrip().startswith("<think>"):
+        raise ScorerError("the model's reply stopped inside its reasoning, before the answer")
+    return text
 _STRICT = ("CRITICAL: Your entire response must be a single JSON object. "
            "Do not include any text, explanation or markdown before or after the JSON.\n\n")
 
@@ -84,8 +95,7 @@ class OllamaScorer:
             text = resp.json().get("response", "")
         except ValueError as e:
             raise ScorerError(f"Ollama sent a reply that is not JSON: {resp.text[:200]}") from e
-        # Some models write their reasoning inline instead of in Ollama's separate thinking field.
-        return _INLINE_THINKING.sub("", text)
+        return _without_reasoning(text)
 
     def _post(self, url: str, body: dict) -> requests.Response:
         try:

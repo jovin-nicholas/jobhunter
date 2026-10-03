@@ -94,9 +94,19 @@ def bootstrap(settings_path: str | Path, env: Mapping[str, str] | None = None) -
         # or cover_letters.options are given; otherwise the scorer itself writes, sharing its keys and rate limits.
         defaults = getattr(registry.scorers.get(name), "LETTER_DEFAULTS", {})
         if letter_writer is not None and (defaults or settings.cover_letters.options):
+            scorer = letter_writer
             scorer_options = next(s.options for s in settings.scorers if s.name == name)
+            defaults = dict(defaults)
+            if "timeout_s" in defaults and "timeout_s" in scorer_options:
+                # Thinking makes letters slower than scoring, so they never get less time than the scorer has.
+                defaults["timeout_s"] = max(defaults["timeout_s"], scorer_options["timeout_s"])
             letter_writer = _construct("cover_letters.options", registry.scorers[name],
                                        {**scorer_options, **defaults, **settings.cover_letters.options}, problems)
+            # A cloud writer on the same API keys shares the scorer's key rotation and pacing, so letters and scoring
+            # together stay within the free tier's rate limit.
+            same_keys = getattr(getattr(letter_writer, "options", None), "api_keys_env", None)
+            if same_keys and same_keys == getattr(getattr(scorer, "options", None), "api_keys_env", None):
+                letter_writer.keys, letter_writer.pacer = scorer.keys, scorer.pacer
         if letter_writer is not None and not callable(getattr(letter_writer, "generate", None)):
             problems.append(f"cover_letters.writer: {settings.cover_letters.writer} cannot write text "
                             "(use ollama, gemini, groq, or a scorer plugin with a generate(prompt) method)")

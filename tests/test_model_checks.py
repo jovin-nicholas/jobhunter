@@ -47,12 +47,13 @@ class TestMemoryNotes(unittest.TestCase):
     def test_one_model_too_big(self):
         notes = memory_notes({"qwen3:32b": 20.0}, False, 16.0)
         self.assertEqual(len(notes), 1)
-        self.assertIn("qwen3:32b needs about 20 GB of memory and this computer has 16 GB", notes[0])
+        self.assertIn("qwen3:32b needs about 20 GB of memory, more than the 12 GB of 16 GB", notes[0])
 
     def test_models_that_do_not_fit_together(self):
         notes = memory_notes({"gemma4:e4b": 9.6, "nimble:9b-q4_K_M": 5.6}, True, 16.0)
         self.assertEqual(len(notes), 1)
-        self.assertIn("gemma4:e4b, nimble:9b-q4_K_M and Laya together need about 17 GB", notes[0])
+        self.assertIn("gemma4:e4b, nimble:9b-q4_K_M and Laya run together and need about 17 GB of memory, more than "
+                      "the 12 GB of 16 GB this computer can spare", notes[0])
 
     def test_unknown_memory(self):
         self.assertEqual(memory_notes({"qwen3:32b": 20.0}, False, None), [])
@@ -146,3 +147,65 @@ class TestCheckConfigNotes(unittest.TestCase):
 
     def test_ready_scorers_give_no_notes(self):
         self.assertNotIn("cannot judge", self.check_config("  - checked: {}"))
+
+
+class TestReviewFixes(unittest.TestCase):
+    def test_a_reply_that_is_not_ollama(self):
+        with patch("jobhunter.ollama_check.requests.get", return_value=FakeResponse(json_data={"models": None})):
+            self.assertIsNone(ollama_problem("http://localhost:11434", "x") and None)
+        with patch("jobhunter.ollama_check.requests.get", return_value=FakeResponse(status_code=404, text="no")):
+            self.assertIn("answered HTTP 404", ollama_problem("http://localhost:11434", "x"))
+        with patch("jobhunter.ollama_check.requests.get", return_value=FakeResponse(json_data={"models": [5]})):
+            self.assertIn("did not answer like Ollama", ollama_problem("http://localhost:11434", "x"))
+
+    def test_remote_ollama_gets_no_local_disk_note(self):
+        with patch("jobhunter.ollama_check.requests.get", return_value=FakeResponse(json_data=TAGS)):
+            self.assertEqual(ollama_problem("http://gpu-box:11434", "qwen3:8b"),
+                             "qwen3:8b is not downloaded; run `ollama pull qwen3:8b`")
+
+    def test_unreadable_disk_is_left_out(self):
+        with patch("jobhunter.ollama_check.requests.get", return_value=FakeResponse(json_data=TAGS)), \
+             patch("jobhunter.ollama_check.shutil.disk_usage", side_effect=PermissionError("no")):
+            self.assertEqual(ollama_problem("http://localhost:11434", "qwen3:8b"),
+                             "qwen3:8b is not downloaded; run `ollama pull qwen3:8b`")
+
+    def test_inline_reasoning(self):
+        from jobhunter.errors import ScorerError
+        from jobhunter.scorers.ollama import _without_reasoning
+        self.assertEqual(_without_reasoning("<think>plan</think>\nDear team"), "Dear team")
+        self.assertEqual(_without_reasoning("plan the letter...\n</think>\n\nDear team"), "Dear team")
+        self.assertEqual(_without_reasoning("Dear team, I think <b> matters"), "Dear team, I think <b> matters")
+        with self.assertRaises(ScorerError):
+            _without_reasoning("<think>a long plan that was cut off")
+
+
+BROKEN = SCORERS + '''
+
+@scorer("broken")
+class Broken:
+    def __init__(self, options):
+        pass
+
+    def score(self, job, resume):
+        return ScoreResult(score=8, model="broken")
+
+    def check(self):
+        raise RuntimeError("plugin bug")
+'''
+
+
+class TestCheckConfigReviewFixes(unittest.TestCase):
+    def run_check(self, scorers, plugins):
+        path = write_project(Path(tempfile.mkdtemp()), SETTINGS.replace("SCORERS_HERE", scorers),
+                             plugins={"boards.py": BOARDS, "scorers.py": plugins})
+        code, out, err = cli("--settings", str(path), "check-config")
+        self.assertEqual(code, 0, err)
+        return out
+
+    def test_the_backup_named_is_one_that_works(self):
+        out = self.run_check("  - checked: {problem: missing}\n  - checked: {problem: also missing}\n  - fixed: {}", CHECKED)
+        self.assertIn("checked cannot judge jobs yet (scorers.checked): missing. Until it is fixed, fixed judges", out)
+
+    def test_a_check_that_raises_is_a_note_not_a_crash(self):
+        out = self.run_check("  - broken: {}", BROKEN)
+        self.assertIn("broken cannot judge jobs yet (scorers.broken): could not be checked (RuntimeError: plugin bug)", out)

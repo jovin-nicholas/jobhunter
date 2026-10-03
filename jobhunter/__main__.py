@@ -25,48 +25,81 @@ from jobhunter.store import Store
 
 def model_notes(app: Any) -> list[str]:
     """Models that cannot run yet (not downloaded, Ollama stopped, too big for this computer), each with what to do."""
-    from jobhunter.ollama_check import installed, memory_gb, memory_notes, size_of
+    from jobhunter.ollama_check import GB, installed, is_local, memory_gb, memory_notes, ollama_problem, size_of
     from jobhunter.scorers.laya import LayaScorer
     from jobhunter.scorers.ollama import OllamaScorer
+    from jobhunter.systemone import SystemOneClient
 
-    notes, problems = [], 0
+    tags: dict[str, Any] = {}           # one /api/tags request per Ollama URL
+
+    def ollama_model(obj: Any) -> tuple[str, str] | None:
+        if isinstance(obj, OllamaScorer):
+            return obj.options.url, obj.options.model
+        if isinstance(obj, SystemOneClient):
+            return obj.settings.url, obj.settings.model
+        return None
+
+    def problem_of(obj: Any) -> str | None:
+        try:
+            where = ollama_model(obj)
+            if where:
+                url, model = where
+                if url not in tags:
+                    tags[url] = installed(url)
+                return ollama_problem(url, model, found=tags[url])
+            return obj.check() if callable(getattr(obj, "check", None)) else None
+        except Exception as e:          # a plugin's check, or an unreadable disk, must not stop check-config
+            return f"could not be checked ({type(e).__name__}: {e})"
+
+    notes, seen = [], set()
     names = [name for name, _ in app.chain.scorers]
-    for i, (name, scorer) in enumerate(app.chain.scorers):
-        problem = scorer.check() if callable(getattr(scorer, "check", None)) else None
+    problems = [problem_of(s) for _, s in app.chain.scorers]
+    for i, (name, problem) in enumerate(zip(names, problems)):
         if problem:
-            problems += 1
-            fallback = f" Until it is fixed, {names[i + 1]} judges the jobs instead." if i + 1 < len(names) else ""
+            seen.add(problem)
+            backup = next((names[j] for j in range(i + 1, len(names)) if not problems[j]), None)
+            fallback = f" Until it is fixed, {backup} judges the jobs instead." if backup else ""
             notes.append(f"{name} cannot judge jobs yet (scorers.{name}): {problem}.{fallback}")
-    if names and problems == len(names):
+    if names and all(problems):
         notes.append("no model can judge jobs right now, so jobhunter can find jobs but cannot tell which ones fit "
                      "your resume: no alerts are sent. Found jobs are kept and judged on a later run once a model "
                      "works (for up to 24 hours). Fix one of the notes above, then run check-config again")
-    writer = app.letter_writer
-    if writer is not None and writer not in dict(app.chain.scorers).values() and callable(getattr(writer, "check", None)):
-        problem = writer.check()
-        if problem:
-            notes.append(f"cover letters cannot be written yet (cover_letters): {problem}. Until then alerts are sent "
-                         "without a letter")
-    clients = {id(f.model): f.model for f in app.filters if getattr(f, "model", None) is not None}.values()
-    for client in clients:
-        problem = client.check() if callable(getattr(client, "check", None)) else None
-        if problem:
-            notes.append(f"the System One checks cannot run yet (filters.systemone): {problem}. Until then those "
-                         "checks are skipped and the jobs they would have removed are kept")
+    for _, scorer in app.chain.scorers:
+        note = scorer.download_note() if isinstance(scorer, LayaScorer) and not problem_of(scorer) else None
+        if note:
+            notes.append(note)
 
-    # Memory: every local model in use, at its pulled size.
-    ollama = [(s.options.url, s.options.model) for _, s in app.chain.scorers if isinstance(s, OllamaScorer)]
-    if isinstance(writer, OllamaScorer):
-        ollama.append((writer.options.url, writer.options.model))
-    ollama += [(c.settings.url, c.settings.model) for c in clients if hasattr(c, "settings")]
+    writer = app.letter_writer
+    own_writer = writer is not None and all(writer is not s for _, s in app.chain.scorers)
+    writer_problem = problem_of(writer) if own_writer else None
+    if writer_problem:
+        said = "the same problem as above" if writer_problem in seen else writer_problem
+        seen.add(writer_problem)
+        notes.append(f"cover letters cannot be written yet (cover_letters): {said}. Until then alerts are sent "
+                     "without a letter")
+    clients = list({id(f.model): f.model for f in app.filters if getattr(f, "model", None) is not None}.values())
+    client_problems = {id(c): problem_of(c) for c in clients}
+    for client in clients:
+        problem = client_problems[id(client)]
+        if problem:
+            said = "the same problem as above" if problem in seen else problem
+            seen.add(problem)
+            notes.append(f"the System One checks cannot run yet (filters.systemone): {said}. Until then those checks "
+                         "are skipped and the jobs they would have removed are kept")
+
+    # Memory: only the models that run together on this computer. The scorer that judges jobs is the first one that
+    # can run (a backup loads only when it fails); the cover-letter writer and the System One model run alongside it.
+    judge = next((s for s, p in zip((s for _, s in app.chain.scorers), problems) if not p), None)
+    together = [judge] + ([writer] if own_writer and not writer_problem else [])
+    together += [c for c in clients if not client_problems[id(c)]]
     sizes = {}
-    for url, model in ollama:
-        found = installed(url)
-        size = size_of(found, model) if isinstance(found, dict) else None
-        if size:
-            sizes[model] = size / 1e9
-    laya = any(isinstance(s, LayaScorer) for _, s in app.chain.scorers)
-    return notes + memory_notes(sizes, laya, memory_gb())
+    for obj in together:
+        where = ollama_model(obj)
+        if where and is_local(where[0]) and isinstance(tags.get(where[0]), dict):
+            size = size_of(tags[where[0]], where[1])
+            if size:
+                sizes[where[1]] = size / GB
+    return notes + memory_notes(sizes, isinstance(judge, LayaScorer), memory_gb())
 
 
 def _print_problems(problems: list[str]) -> int:

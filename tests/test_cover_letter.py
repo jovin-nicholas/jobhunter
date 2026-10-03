@@ -109,6 +109,24 @@ class TestCoverLetters(unittest.TestCase):
         letters = self.ollama_app(", options: {model: qwen3:8b, think: false, temperature: 0.3}").letter_writer.options
         self.assertEqual((letters.model, letters.think, letters.temperature), ("qwen3:8b", False, 0.3))
 
+    def test_letters_never_get_less_time_than_scoring(self):
+        text = SETTINGS.replace("  - writer: {WRITER_OPTIONS}\n", "  - ollama: {model: gemma4:e4b, timeout_s: 1200}\n").replace(
+            "writer: writer}", "writer: ollama}")
+        app = bootstrap(write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS}), env={})
+        self.assertEqual(app.letter_writer.options.timeout_s, 1200)
+
+    def test_a_cloud_writer_shares_the_scorers_keys_and_pace(self):
+        text = SETTINGS.replace("  - writer: {WRITER_OPTIONS}\n", "  - gemini: {model: m}\n").replace(
+            "writer: writer}", "writer: gemini, options: {timeout_s: 90}}")
+        with patch.dict("os.environ", {"GEMINI_API_KEYS": "k1,k2"}):
+            app = bootstrap(write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS}),
+                            env={"GEMINI_API_KEYS": "k1,k2"})
+        scorer = dict(app.chain.scorers)["gemini"]
+        self.assertIsNot(app.letter_writer, scorer)
+        self.assertEqual(app.letter_writer.options.timeout_s, 90)
+        self.assertIs(app.letter_writer.keys, scorer.keys)
+        self.assertIs(app.letter_writer.pacer, scorer.pacer)
+
     def test_an_unknown_letter_option_is_a_settings_problem(self):
         with self.assertRaises(SettingsError) as err:
             self.ollama_app(", options: {creativity: 11}")

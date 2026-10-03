@@ -59,7 +59,7 @@ filters:                                # run before any model, in this order
   keywords:                             # whole words and phrases, case-insensitive
     exclude_title: [principal, lead, staff, manager, director, vp, head, embedded, hardware, firmware,
                     scientist, ml engineer]
-    exclude_phrases: [security clearance, ts/sci, top secret, polygraph,
+    exclude_phrases: [security clearance, ts/sci, top secret, polygraph, background investigation,
                       us person required]
     exclude_companies: [lensa, beaconfire, dataannotation, speechify, revature, bairesdev, turing,
                         crossover, epictura, fdny, outlier, capital placement]
