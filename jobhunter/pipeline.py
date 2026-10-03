@@ -278,6 +278,8 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
             store.save(job, outcome.status, resume_id=resume.id)
         return
 
+    for failure in outcome.first_failures:
+        log(f"note: {failure}; scored with {outcome.result.model} instead (noted once per run)")
     status = STATUS_FOR_DECISION[outcome.result.decision]
     if status == "notified" and notified is not None:
         key = same_job_key(job.title, job.company)

@@ -8,6 +8,7 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -20,6 +21,52 @@ from jobhunter.registry import build_registry
 from jobhunter.schedule import is_due, is_quiet, local_time, next_due, read_last_run, write_last_run
 from jobhunter.settings import load_settings
 from jobhunter.store import Store
+
+
+def model_notes(app: Any) -> list[str]:
+    """Models that cannot run yet (not downloaded, Ollama stopped, too big for this computer), each with what to do."""
+    from jobhunter.ollama_check import installed, memory_gb, memory_notes, size_of
+    from jobhunter.scorers.laya import LayaScorer
+    from jobhunter.scorers.ollama import OllamaScorer
+
+    notes, problems = [], 0
+    names = [name for name, _ in app.chain.scorers]
+    for i, (name, scorer) in enumerate(app.chain.scorers):
+        problem = scorer.check() if callable(getattr(scorer, "check", None)) else None
+        if problem:
+            problems += 1
+            fallback = f" Until it is fixed, {names[i + 1]} judges the jobs instead." if i + 1 < len(names) else ""
+            notes.append(f"{name} cannot judge jobs yet (scorers.{name}): {problem}.{fallback}")
+    if names and problems == len(names):
+        notes.append("no model can judge jobs right now, so jobhunter can find jobs but cannot tell which ones fit "
+                     "your resume: no alerts are sent. Found jobs are kept and judged on a later run once a model "
+                     "works (for up to 24 hours). Fix one of the notes above, then run check-config again")
+    writer = app.letter_writer
+    if writer is not None and writer not in dict(app.chain.scorers).values() and callable(getattr(writer, "check", None)):
+        problem = writer.check()
+        if problem:
+            notes.append(f"cover letters cannot be written yet (cover_letters): {problem}. Until then alerts are sent "
+                         "without a letter")
+    clients = {id(f.model): f.model for f in app.filters if getattr(f, "model", None) is not None}.values()
+    for client in clients:
+        problem = client.check() if callable(getattr(client, "check", None)) else None
+        if problem:
+            notes.append(f"the System One checks cannot run yet (filters.systemone): {problem}. Until then those "
+                         "checks are skipped and the jobs they would have removed are kept")
+
+    # Memory: every local model in use, at its pulled size.
+    ollama = [(s.options.url, s.options.model) for _, s in app.chain.scorers if isinstance(s, OllamaScorer)]
+    if isinstance(writer, OllamaScorer):
+        ollama.append((writer.options.url, writer.options.model))
+    ollama += [(c.settings.url, c.settings.model) for c in clients if hasattr(c, "settings")]
+    sizes = {}
+    for url, model in ollama:
+        found = installed(url)
+        size = size_of(found, model) if isinstance(found, dict) else None
+        if size:
+            sizes[model] = size / 1e9
+    laya = any(isinstance(s, LayaScorer) for _, s in app.chain.scorers)
+    return notes + memory_notes(sizes, laya, memory_gb())
 
 
 def _print_problems(problems: list[str]) -> int:
@@ -118,9 +165,11 @@ def main(argv: list[str] | None = None) -> int:
         return _print_problems(e.problems)
 
     if args.command == "check-config":
-        print(f"OK: {len(app.boards)} board(s) ({', '.join(app.boards) or 'none enabled'}), "
+        print(f"Settings OK: {len(app.boards)} board(s) ({', '.join(app.boards) or 'none enabled'}), "
               f"scorers in order: {', '.join(name for name, _ in app.chain.scorers)}, "
               f"resumes: {', '.join(app.resumes.resumes)}")
+        for note in model_notes(app):
+            print(f"note: {note}")
         if not app.resumes.names:
             print("note: no name found on the default resume's first line, so none is removed before models see "
                   "the resumes; set CANDIDATE_NAMES in .env (or resumes.names) to be sure")

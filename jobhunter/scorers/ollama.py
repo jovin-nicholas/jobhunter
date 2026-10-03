@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import requests
 
 from jobhunter.errors import RateLimited, ScorerError, ScorerUnavailable
+from jobhunter.ollama_check import ollama_problem
 from jobhunter.models import Job, Resume, ScoreResult
 from jobhunter.registry import scorer
 from jobhunter.scorers.prompt import build_prompt, parse_json, to_result
@@ -45,6 +46,10 @@ class OllamaScorer:
         except ScorerError:
             # Small local models sometimes wrap or break the JSON; one stricter retry fixes most of those.
             return to_result(parse_json(self._generate(_STRICT + prompt)), self.name)
+
+    def check(self) -> str | None:
+        """For check-config: why this scorer cannot run yet (Ollama stopped, model not pulled), or None."""
+        return ollama_problem(self.options.url, self.options.model)
 
     def generate(self, prompt: str) -> str:
         """Plain text, for cover letters."""

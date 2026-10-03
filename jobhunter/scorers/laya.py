@@ -1,10 +1,11 @@
-"""Scores jobs with Laya (local, fast): the fine-tuned checkpoint from the Colab notebook, or base Laya.
+"""Scores jobs with Laya (local, fast): base Laya from Hugging Face, or a fine-tuned checkpoint folder.
 
-The questions and input layout are copied from job-notifier's export_laya_finetune.py and the notebook, so the model
-sees exactly what it was trained on.
+The questions and input layout match the ones fine-tuned checkpoints are trained with, so such a model sees exactly
+what it learned from.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from dataclasses import dataclass
@@ -91,6 +92,11 @@ def _load_agent(model: str, device: str | None) -> Any:
         raise ScorerUnavailable(f"could not load Laya model {model!r}: {e}") from e
 
 
+def _is_folder(model: str) -> bool:
+    """A path rather than a Hugging Face id ("org/name")."""
+    return model.startswith(("/", "~", ".")) or model.count("/") != 1 or os.path.exists(os.path.expanduser(model))
+
+
 @scorer("laya")
 class LayaScorer:
     @dataclass
@@ -105,6 +111,15 @@ class LayaScorer:
         self._factory = agent_factory or _load_agent
         self._agent = None
         self._load_error: ScorerError | None = None
+
+    def check(self) -> str | None:
+        """For check-config: why Laya cannot run yet, or None. A Hugging Face id is downloaded on first use."""
+        if importlib.util.find_spec("laya") is None:
+            return "the laya package is not installed; run `.venv/bin/pip install -r requirements-laya.txt`"
+        if _is_folder(self.options.model) and not os.path.isdir(self.model):
+            return (f"model folder {self.model} not found; use a Hugging Face id such as convaiinnovations/laya "
+                    "(downloaded on the first run) or the folder of a fine-tuned Laya")
+        return None
 
     def _get_agent(self) -> Any:
         # Loading takes seconds and ~1 GB; do it once per run, and after a failure fail fast on every later job.

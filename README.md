@@ -12,7 +12,8 @@ python3.13 -m venv .venv
 cp jobhunter.example.yaml jobhunter.yaml                              # edit: resume, searches, filters, model
 cp .env.example .env                                                  # optional: notifications, CANDIDATE_NAMES
 # put your resume in resumes/
-.venv/bin/python -m jobhunter check-config
+ollama pull gemma4:e4b                                                # the fallback scorer; any local model works (below)
+.venv/bin/python -m jobhunter check-config                            # also says which models are missing
 .venv/bin/python -m jobhunter run --dry-run                           # scores everything, saves and sends nothing
 .venv/bin/python -m jobhunter run
 ```
@@ -52,14 +53,51 @@ that fires every 15 minutes and let jobhunter decide when a run is due:
 Laya is the default scorer: a local decision model, about 1 second per job on an Apple-silicon GPU (the first job also
 loads the model, about 5 s).
 
-- `laya.model` is a local checkpoint folder, such as the fine-tuned one from the Colab notebook
-  (`~/models/laya_finetuned`), or a Hugging Face id such as `convaiinnovations/laya`.
+- `laya.model` is a Hugging Face id such as `convaiinnovations/laya`, downloaded on the first run, or the folder of a
+  Laya you fine-tuned on your own job decisions (`~/models/laya_finetuned`).
 - A local folder's `rl_agent_config.json` says how its decisions were trained (`question` or `from_score`) and at
   which thresholds; jobhunter reads both. For a Hugging Face id the defaults are used (`question`, notify at 7, log
   at 5).
-- If Laya is not installed or its model is missing, jobs fall through to the next scorer (`ollama`).
+- If Laya is not installed or its model folder is missing, jobs fall through to the next scorer (`ollama`). The run
+  log notes it once per run, and `check-config` says what is missing.
 - A job whose description could not be downloaded (the site refused or timed out) is not scored from its title; it
   is saved as `error_unavailable` and tried again on the next run.
+
+## Ollama: choosing a local model
+
+`gemma4:e4b` is only a suggestion. Any Ollama model that fits your computer can score jobs and write cover letters:
+put its name in `ollama: {model: ...}` and run `ollama pull <name>`. Nothing is downloaded for you; `check-config`
+says when a model is missing or Ollama is not running. A model needs:
+
+- **About 4B parameters or more.** Smaller models often break the JSON answer or give every job the same score.
+- **A context window of at least 4,096 tokens.** A prompt is about 1,300 tokens with a one-page resume and the first
+  2,000 characters of a posting; raise `num_ctx` for a long resume.
+- **Free memory of about its download size plus 1-2 GB.** As a guide: 8 GB of RAM fits a 4B model such as
+  `qwen3:4b`; 16 GB fits `gemma4:e4b` (9.6 GB) or an 8B model such as `qwen3:8b`. Without a GPU (Apple silicon,
+  or NVIDIA with enough memory) expect a minute or more per job.
+
+`check-config` also warns when a model, or all the models in use together (Laya, the scorer, the cover-letter writer
+and the System One model), need more memory than the computer can spare, and says how much disk space is free when a
+model still has to be pulled. A pull that runs out of disk space fails and leaves the model missing; free some space
+and pull it again.
+
+**Judging jobs and writing cover letters need different sizes.** For judging jobs, a 4B model is enough: on 60 test
+postings `qwen3:4b` (2.5 GB) picked good jobs as well as `gemma4:e4b` (9.6 GB), about 2.5 times faster. Cover
+letters need a larger model: in the same test `qwen3:4b` repeated numbers from the resume against the prompt's rules,
+reused one example twice and fell back on stock phrases, while `gemma4:e4b` followed the rules. So pick the scoring
+model to fit your computer, and if you turn cover letters on, give them the largest model it can run:
+
+```yaml
+scorers:
+  - ollama: {model: "qwen3:4b"}         # judges jobs
+cover_letters:
+  enabled: true
+  writer: ollama
+  options: {model: "gemma4:e4b"}        # writes the letters
+```
+
+Models with and without a thinking mode both work: scoring turns thinking off, and cover letters turn it on only when
+the model supports it.
 
 ### Optional: a System One checker
 

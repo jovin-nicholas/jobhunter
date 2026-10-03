@@ -100,8 +100,8 @@ Tried in order until one answers; rate limits and errors fall through to the nex
 
 | Scorer | Options (defaults) |
 |---|---|
-| `laya` | `model` (a local checkpoint folder or a Hugging Face id), `device` (best available) |
-| `ollama` | `model`, `url: http://localhost:11434`, `timeout_s: 240`, `max_description_chars: 2000`, `think: false` (thinking models answer about 4x faster), `temperature: 0` (the same posting always gets the same score), `num_ctx` (Ollama's default) |
+| `laya` | `model` (a Hugging Face id, downloaded on first use, or a fine-tuned checkpoint folder), `device` (best available) |
+| `ollama` | `model` (any pulled Ollama model; see the README's Ollama section), `url: http://localhost:11434`, `timeout_s: 240`, `max_description_chars: 2000`, `think: false` (thinking models answer about 4x faster), `temperature: 0` (the same posting always gets the same score), `num_ctx` (Ollama's default) |
 | `gemini` | `model: gemini-3.5-flash-lite`, `api_keys_env: GEMINI_API_KEYS`, `min_interval_s: 4`, `timeout_s: 30` |
 | `groq` | `model: openai/gpt-oss-120b`, `api_keys_env: GROQ_API_KEYS`, `min_interval_s: 2.1` |
 
@@ -143,4 +143,4 @@ notify:
 |---|---|---|
 | `enabled` | false | Add a draft letter to each notification |
 | `writer` | none | A scorer listed under `scorers` that can write text: `ollama`, `gemini` or `groq` |
-| `options` | none | The writer's options for letters only, over its scorer options, e.g. `{model: qwen3:8b, temperature: 0.5}`. With `ollama`, letters default to `think: true`, `temperature: 0.7` and `timeout_s: 600` (thinking reads better and is slower), while scoring keeps `think: false` and `temperature: 0`. A model without thinking is asked again without it, so any Ollama model works |
+| `options` | none | The writer's options for letters only, over its scorer options, e.g. `{model: qwen3:8b, temperature: 0.5}`. With `ollama`, letters default to `think: true`, `temperature: 0.7` and `timeout_s: 600` (thinking reads better and is slower), while scoring keeps `think: false` and `temperature: 0`. A 4B model is enough to judge jobs but writes weak letters, so `options: {model: ...}` can give letters a larger model (README: Ollama). A model without thinking is asked again without it, so any Ollama model works |

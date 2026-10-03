@@ -19,8 +19,9 @@ filters:                                # applied before any model scores a job
     exclude_phrases: [security clearance, us citizen]
 
 scorers:                                # tried in order until one answers
-  - laya: {model: ~/models/laya_finetuned}   # your fine-tuned Laya folder (README: Laya)
-  - ollama: {model: "gemma4:e4b"}             # local fallback; needs `ollama serve`
+  - laya: {model: convaiinnovations/laya}    # downloaded on the first run; or a fine-tuned folder (README: Laya)
+  - ollama: {model: "gemma4:e4b"}             # local fallback: any model that fits your computer (README: Ollama);
+                                              # run `ollama pull gemma4:e4b` first
 
 # Optional (examples; leave them out for the defaults):
 # boards: [dice, linkedin, greenhouse, lever, ashby, workday]   # default: all 12 built-in boards

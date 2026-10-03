@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 import requests
 
+from jobhunter.ollama_check import ollama_problem
 from jobhunter.settings import SystemOneSettings
 
 KEEP_ALIVE = "5m"             # unload soon after a run, so the model does not hold memory other apps need
@@ -50,6 +51,10 @@ class SystemOneClient:
         self._failures = 0
         self._cache[key] = float(value)
         return float(value)
+
+    def check(self) -> str | None:
+        """For check-config: why the model cannot answer yet, or None."""
+        return ollama_problem(self.settings.url, self.settings.model)
 
     def report(self) -> str | None:
         """One line for the run log when the model could not be used, else None."""
