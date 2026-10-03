@@ -3,7 +3,7 @@
 # Secrets (webhooks, passwords, API keys) go in .env; this file only names the environment variables.
 
 resumes:
-  folder: resumes/
+  folder: resumes/                      # relative to this file
   default: backend.txt                  # .txt, .md, .pdf or .docx
   versions:                             # optional: used when a job mentions more of these words
     fullstack.txt:
@@ -15,15 +15,24 @@ search:
   queries: [software engineer generalist, SDE new grad, full stack engineer, backend engineer,
             platform engineer, data engineer, AI engineer]
   locations: [United States, "Austin, TX", "Chicago, IL", "New York, NY", Remote]
-  max_age_hours: 72
+  max_age_hours: 72                     # skip postings older than this (72 = 3 days); the default
   fetch_descriptions: true              # fetch the posting page when a board gives no description (LinkedIn, Hyde Park)
 
 boards:                                 # built-in boards, or the name of a file in plugins/
-  dice: {}
-  linkedin: {timeout_s: 1200}           # needs Node.js (npx); one search per query and location, 5 s apart
-  industry_jobs: {}                     # dev.to #jobs and #hiring posts
-  top_companies: {}                     # Amazon, plus SoFi and Stripe on Greenhouse
-  hydepark: {}                          # Hyde Park Venture Partners portfolio jobs
+  dice:                                 # newest Dice postings for each search query
+    jobs_per_page: 100                  # 1-100
+    max_pages: 3                        # so up to 300 postings per query
+  linkedin: {timeout_s: 1200}           # needs Node.js (npx); one search per query and location, 5s apart
+  industry_jobs:                        # dev.to posts with any of these tags (dev.to/t/<tag>)
+    tags: [jobs, hiring]
+  top_companies:                        # chosen employers' own career sites
+    amazon: true                        # amazon.jobs; false to leave it out
+    amazon_queries: 4                   # searched with your first 4 search queries
+    greenhouse:                         # Greenhouse companies as <id>: <name>; the id is in boards.greenhouse.io/<id>
+      sofi: SoFi                        # listing companies here replaces these two defaults
+      stripe: Stripe
+  hydepark:                             # jobs at Hyde Park Venture Partners portfolio companies
+    job_functions: [Software Engineering]
   # ATS boards: `discover: true` reads postings found by discovery (below); `companies` lists whole boards,
   # e.g. greenhouse: {companies: [stripe, airbnb], discover: true}. Workday, Dover, ADP and Gem only discover.
   greenhouse: {discover: true, timeout_s: 1800}
@@ -43,14 +52,14 @@ discovery:                              # links to ATS postings, fetched once pe
 
 filters:                                # run before any model, in this order
   location:
-    countries: [US]
+    countries: [US]                     # keep jobs in these countries; also CA, GB, IN, DE built in
   seniority:
     levels: [intern, entry, mid, senior]   # intern | entry | mid | senior | staff
-    max_years_required: 3
+    max_years_required: 3               # skip jobs asking for more years of experience than this
   keywords:                             # whole words and phrases, case-insensitive
     exclude_title: [principal, lead, staff, manager, director, vp, head, embedded, hardware, firmware,
                     scientist, ml engineer]
-    exclude_phrases: [security clearance, ts/sci, top secret, polygraph, background investigation,
+    exclude_phrases: [security clearance, ts/sci, top secret, polygraph,
                       us person required]
     exclude_companies: [lensa, beaconfire, dataannotation, speechify, revature, bairesdev, turing,
                         crossover, epictura, fdny, outlier, capital placement]
@@ -60,7 +69,7 @@ filters:                                # run before any model, in this order
   # answer. skip_if reads eligibility lines, so "U.S. citizen" in equal-opportunity text does not skip a job.
   systemone:
     model: "nimble:9b-q4_K_M"
-    timeout_s: 30
+    timeout_s: 30                       # seconds per question
     skip_if: [citizenship]              # citizenship and/or clearance
 
 scorers:                                # tried in order; errors and rate limits fall through to the next
@@ -73,17 +82,20 @@ scorers:                                # tried in order; errors and rate limits
 cover_letters:                          # a draft letter in each notification, written by a text model
   enabled: false
   writer: ollama                        # ollama, gemini or groq (must be listed under scorers)
+  # options: {temperature: 0.7}         # for letters only; ollama letters default to think: true, temperature: 0.7
 
 decisions:
   notify_at: 7                          # score >= 7 -> notify
   log_at: 5                             # score 5-6 -> log; below 5 -> skip
-  min_confidence: 0.7                   # a Laya notify it is less sure of is logged instead
+  min_confidence: 0.7                   # Laya also says how sure it is, from 0 to 1. A job it scores notify_at or
+                                        # higher, but is less than 0.7 sure of, is logged instead of sent. Leave
+                                        # it out to send every job that reaches notify_at
 
 schedule:                               # used by scheduler.py and `run --scheduled`; a plain `run` ignores it
-  every: 1h
-  quiet_hours: "22:00-07:00"
-  quiet_days: [sat, sun]
-  timezone: America/New_York
+  every: 1h                             # time between runs: 15m to 24h
+  quiet_hours: "22:00-07:00"            # no runs in this window (may cross midnight)
+  quiet_days: [sat, sun]                # no runs on these days
+  timezone: America/New_York            # for quiet hours and days; default: the computer's
 
 # notify:
 #   slack: {webhook_env: SLACK_WEBHOOK_URL}

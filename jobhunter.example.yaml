@@ -9,6 +9,7 @@ resumes:
 search:                                 # what to look for, and where
   queries: [software engineer, backend engineer, full stack engineer]
   locations: [United States, Remote]
+  # max_age_hours: 72                   # skip postings older than this (default 72 = 3 days)
 
 filters:                                # applied before any model scores a job
   location: {countries: [US]}

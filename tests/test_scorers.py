@@ -143,11 +143,32 @@ class TestOllama(unittest.TestCase):
         body = post.call_args.kwargs["json"]
         self.assertEqual((body["think"], body["options"]), (True, {"temperature": 0.7, "num_ctx": 8192}))
 
-    def test_cover_letters_also_skip_thinking(self):
+    def test_generate_writes_plain_text_with_the_scorers_settings(self):
+        # Letter defaults (thinking on) come from cover_letters, which builds its own writer; see test_cover_letter.
         with patch("jobhunter.scorers.ollama.requests.post", return_value=FakeResponse(json_data={"response": "Dear team"})) as post:
             self.scorer().generate("Write a letter")
         self.assertNotIn("format", post.call_args.kwargs["json"])
         self.assertIs(post.call_args.kwargs["json"]["think"], False)
+
+    def test_a_model_that_cannot_think_is_asked_again_without_thinking(self):
+        scorer = OllamaScorer({"model": "llama3", "think": True})
+        refused = FakeResponse(status_code=400, text='{"error":"\\"llama3\\" does not support thinking"}')
+        replies = [refused, FakeResponse(json_data={"response": "Dear team"}), FakeResponse(json_data={"response": "Again"})]
+        with patch("jobhunter.scorers.ollama.requests.post", side_effect=replies) as post:
+            self.assertEqual(scorer.generate("Write a letter"), "Dear team")
+            self.assertEqual(scorer.generate("Write another"), "Again")
+        bodies = [c.kwargs["json"] for c in post.call_args_list]
+        self.assertEqual(["think" in b for b in bodies], [True, False, False])   # remembered: asked without it next time
+
+    def test_other_bad_requests_are_errors(self):
+        with patch("jobhunter.scorers.ollama.requests.post", return_value=FakeResponse(status_code=400, text="bad prompt")):
+            with self.assertRaises(ScorerError):
+                OllamaScorer({"model": "m", "think": True}).generate("x")
+
+    def test_inline_thinking_is_removed(self):
+        reply = FakeResponse(json_data={"response": "<think>\nThe user wants a letter.\n</think>\n\nDear team"})
+        with patch("jobhunter.scorers.ollama.requests.post", return_value=reply):
+            self.assertEqual(self.scorer().generate("Write a letter"), "Dear team")
 
 
 

@@ -138,6 +138,7 @@ class DiscoverySettings:
 class CoverLetterSettings:
     enabled: bool = False
     writer: str | None = None                 # a scorer listed under `scorers` that can write text
+    options: dict = field(default_factory=dict)   # the writer's options for letters, over its scorer options
 
 
 @dataclass
@@ -461,7 +462,7 @@ def _discovery(c: _Checker, raw: Any) -> DiscoverySettings:
 
 
 def _cover_letters(c: _Checker, raw: Any, scorers: list[ScorerSettings]) -> CoverLetterSettings:
-    raw = c.mapping("cover_letters", raw, {"enabled", "writer"})
+    raw = c.mapping("cover_letters", raw, {"enabled", "writer", "options"})
     enabled = c.boolean("cover_letters.enabled", raw.get("enabled"), False)
     writer = raw.get("writer")
     if writer is not None and not isinstance(writer, str):
@@ -471,7 +472,11 @@ def _cover_letters(c: _Checker, raw: Any, scorers: list[ScorerSettings]) -> Cove
         c.add("cover_letters.writer", "missing: name the scorer that writes the letters (ollama, gemini or groq)")
     elif writer and writer not in {s.name for s in scorers}:
         c.add("cover_letters.writer", f"{writer!r} is not listed under scorers")
-    return CoverLetterSettings(enabled, writer)
+    options = raw.get("options") or {}
+    if not isinstance(options, dict):
+        c.add("cover_letters.options", "expected a mapping of the writer's options, e.g. {think: true, temperature: 0.7}")
+        options = {}
+    return CoverLetterSettings(enabled, writer, dict(options))
 
 
 def _schedule(c: _Checker, raw: Any) -> ScheduleSettings:

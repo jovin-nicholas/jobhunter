@@ -88,7 +88,15 @@ def bootstrap(settings_path: str | Path, env: Mapping[str, str] | None = None) -
         scorers.append((s.name, _construct(f"scorers.{s.name}", registry.scorers[s.name], s.options, problems)))
     letter_writer = None
     if settings.cover_letters.enabled:
-        letter_writer = dict(scorers).get(settings.cover_letters.writer)
+        name = settings.cover_letters.writer
+        letter_writer = dict(scorers).get(name)
+        # Letters get their own writer when the scorer has letter defaults (Ollama: thinking on, some temperature)
+        # or cover_letters.options are given; otherwise the scorer itself writes, sharing its keys and rate limits.
+        defaults = getattr(registry.scorers.get(name), "LETTER_DEFAULTS", {})
+        if letter_writer is not None and (defaults or settings.cover_letters.options):
+            scorer_options = next(s.options for s in settings.scorers if s.name == name)
+            letter_writer = _construct("cover_letters.options", registry.scorers[name],
+                                       {**scorer_options, **defaults, **settings.cover_letters.options}, problems)
         if letter_writer is not None and not callable(getattr(letter_writer, "generate", None)):
             problems.append(f"cover_letters.writer: {settings.cover_letters.writer} cannot write text "
                             "(use ollama, gemini, groq, or a scorer plugin with a generate(prompt) method)")

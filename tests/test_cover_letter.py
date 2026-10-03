@@ -21,6 +21,7 @@ from jobhunter import ScoreResult, scorer
 @scorer("writer")
 class Writer:
     def __init__(self, options):
+        self.options = options
         self.fail = options.get("fail", False)
 
     def score(self, job, resume):
@@ -77,6 +78,41 @@ class TestCoverLetters(unittest.TestCase):
         with self.assertRaises(SettingsError) as err:
             bootstrap(path, env={})
         self.assertIn("cover_letters.writer: fixed cannot write text", "\n".join(err.exception.problems))
+
+    def test_letter_options_give_letters_their_own_writer(self):
+        text = SETTINGS.replace("{WRITER_OPTIONS}", "{style: plain}").replace(
+            "writer: writer}", "writer: writer, options: {style: warm}}")
+        path = write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS, "writer.py": WRITER})
+        app = bootstrap(path, env={})
+        self.assertIsNot(app.letter_writer, dict(app.chain.scorers)["writer"])
+        self.assertEqual(app.letter_writer.options, {"style": "warm"})
+
+    def test_without_letter_options_the_scorer_writes(self):
+        path = write_project(self.tmp, SETTINGS.replace("{WRITER_OPTIONS}", "{}"),
+                             plugins={"boards.py": BOARDS, "scorers.py": SCORERS, "writer.py": WRITER})
+        app = bootstrap(path, env={})
+        self.assertIs(app.letter_writer, dict(app.chain.scorers)["writer"])
+
+    def ollama_app(self, letter_options=""):
+        text = SETTINGS.replace("  - writer: {WRITER_OPTIONS}\n", "  - ollama: {model: gemma4:e4b, timeout_s: 120}\n").replace(
+            "writer: writer}", "writer: ollama" + letter_options + "}")
+        return bootstrap(write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS}), env={})
+
+    def test_ollama_letters_think_with_some_temperature_by_default(self):
+        app = self.ollama_app()
+        letters = app.letter_writer.options
+        self.assertEqual((letters.model, letters.think, letters.temperature, letters.timeout_s), ("gemma4:e4b", True, 0.7, 600))
+        scoring = next(s for name, s in app.chain.scorers if name == "ollama").options
+        self.assertEqual((scoring.think, scoring.temperature, scoring.timeout_s), (False, 0.0, 120))
+
+    def test_ollama_letter_options_override_the_defaults(self):
+        letters = self.ollama_app(", options: {model: qwen3:8b, think: false, temperature: 0.3}").letter_writer.options
+        self.assertEqual((letters.model, letters.think, letters.temperature), ("qwen3:8b", False, 0.3))
+
+    def test_an_unknown_letter_option_is_a_settings_problem(self):
+        with self.assertRaises(SettingsError) as err:
+            self.ollama_app(", options: {creativity: 11}")
+        self.assertIn("cover_letters.options: could not start", "\n".join(err.exception.problems))
 
     def test_prompt(self):
         job = Job("x", "Backend Engineer", "Acme", "Remote", "u", description="Go " * 2000)

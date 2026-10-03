@@ -40,7 +40,7 @@ boards:                                          # or with options
 | `dice` | `jobs_per_page: 100`, `max_pages: 3` | Full descriptions through Dice's public MCP server; newest first, only postings Dice dates within `max_age_hours` (1, 3 or 7 days) |
 | `linkedin` | `date_since_posted: past 24 hours`, `max_hours_old: 1`, `limit: 25`, `delay_s: 5`, `npx` | Needs Node.js; skipped with a note without it. The search server gives only a posting date, so `max_hours_old` applies only when it also says "N hours ago"; `search.max_age_hours` still applies |
 | `industry_jobs` | `tags: [jobs, hiring]` | dev.to job posts |
-| `top_companies` | `amazon: true`, `amazon_queries: 4`, `greenhouse: {sofi: SoFi, stripe: Stripe}` | Amazon plus named Greenhouse boards |
+| `top_companies` | `amazon: true`, `amazon_queries: 4`, `greenhouse: {sofi: SoFi, stripe: Stripe}` | amazon.jobs, searched with the first `amazon_queries` search queries, plus whole Greenhouse boards: each key is the company's id from `boards.greenhouse.io/<id>`, each value the name to show. A `greenhouse` list replaces the default one |
 | `hydepark` | `collection_id: 112`, `job_functions: [Software Engineering]` | Hyde Park Venture Partners portfolio |
 | `greenhouse`, `lever`, `ashby` | `companies: []`, `discover` (on when no companies) | Company boards and discovered postings |
 | `workday`, `dover`, `adp`, `gem` | `discover: true` | Discovered postings only |
@@ -113,7 +113,7 @@ Several cloud keys can be listed comma-separated in `.env`; a rate-limited key r
 |---|---|---|
 | `notify_at` | 7 | A score of at least this is notified |
 | `log_at` | 5 | At least this (and below `notify_at`) is logged; lower is skipped |
-| `min_confidence` | none | A notify whose scorer confidence (Laya reports one) is below this, from 0 to 1, is logged instead |
+| `min_confidence` | none | Laya also reports how sure it is, from 0 to 1. A job that reaches `notify_at` but whose confidence is below this is logged instead of sent. Scorers without a confidence (Ollama, Gemini, Groq) are not affected |
 
 ## schedule
 
@@ -143,3 +143,4 @@ notify:
 |---|---|---|
 | `enabled` | false | Add a draft letter to each notification |
 | `writer` | none | A scorer listed under `scorers` that can write text: `ollama`, `gemini` or `groq` |
+| `options` | none | The writer's options for letters only, over its scorer options, e.g. `{model: qwen3:8b, temperature: 0.5}`. With `ollama`, letters default to `think: true`, `temperature: 0.7` and `timeout_s: 600` (thinking reads better and is slower), while scoring keeps `think: false` and `temperature: 0`. A model without thinking is asked again without it, so any Ollama model works |

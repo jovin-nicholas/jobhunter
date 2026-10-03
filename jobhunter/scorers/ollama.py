@@ -1,6 +1,7 @@
 """Scores jobs with a local Ollama model (free, runs on your machine)."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import requests
@@ -10,12 +11,16 @@ from jobhunter.models import Job, Resume, ScoreResult
 from jobhunter.registry import scorer
 from jobhunter.scorers.prompt import build_prompt, parse_json, to_result
 
+_INLINE_THINKING = re.compile(r"^\s*<think>.*?</think>\s*", re.S)
 _STRICT = ("CRITICAL: Your entire response must be a single JSON object. "
            "Do not include any text, explanation or markdown before or after the JSON.\n\n")
 
 
 @scorer("ollama")
 class OllamaScorer:
+    # Cover letters read better with thinking on and some variety; thinking is slower, so they get more time.
+    LETTER_DEFAULTS = {"think": True, "temperature": 0.7, "timeout_s": 600}
+
     @dataclass
     class Options:
         model: str
@@ -30,6 +35,7 @@ class OllamaScorer:
     def __init__(self, options: dict):
         self.options = self.Options(**options)
         self.name = f"ollama:{self.options.model}"
+        self._thinks = True             # False once Ollama says the model cannot think
 
     def score(self, job: Job, resume: Resume) -> ScoreResult:
         prompt = build_prompt(job, resume, self.options.max_description_chars)
@@ -49,14 +55,17 @@ class OllamaScorer:
         options = {"temperature": self.options.temperature}
         if self.options.num_ctx:
             options["num_ctx"] = self.options.num_ctx
-        body = {"model": self.options.model, "prompt": prompt, "stream": False, "think": self.options.think,
-                "options": options}
+        body = {"model": self.options.model, "prompt": prompt, "stream": False, "options": options}
+        if self._thinks:
+            body["think"] = self.options.think
         if json_format:
             body["format"] = "json"
-        try:
-            resp = requests.post(url, json=body, timeout=self.options.timeout_s)
-        except requests.RequestException as e:
-            raise ScorerUnavailable(f"Ollama not reachable at {self.options.url} ({e}); is `ollama serve` running?") from e
+        resp = self._post(url, body)
+        if resp.status_code == 400 and "does not support thinking" in resp.text and "think" in body:
+            # A model without thinking rejects think: true (think: false is accepted); ask again without it.
+            self._thinks = False
+            body = {k: v for k, v in body.items() if k != "think"}
+            resp = self._post(url, body)
         if resp.status_code == 429:
             raise RateLimited("Ollama returned HTTP 429")
         if resp.status_code == 404:
@@ -67,6 +76,14 @@ class OllamaScorer:
         if resp.status_code != 200:
             raise ScorerError(f"Ollama returned HTTP {resp.status_code}: {resp.text[:200]}")
         try:
-            return resp.json().get("response", "")
+            text = resp.json().get("response", "")
         except ValueError as e:
             raise ScorerError(f"Ollama sent a reply that is not JSON: {resp.text[:200]}") from e
+        # Some models write their reasoning inline instead of in Ollama's separate thinking field.
+        return _INLINE_THINKING.sub("", text)
+
+    def _post(self, url: str, body: dict) -> requests.Response:
+        try:
+            return requests.post(url, json=body, timeout=self.options.timeout_s)
+        except requests.RequestException as e:
+            raise ScorerUnavailable(f"Ollama not reachable at {self.options.url} ({e}); is `ollama serve` running?") from e
