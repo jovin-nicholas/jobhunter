@@ -51,15 +51,21 @@ filters:                                # run before any model, in this order
     exclude_title: [principal, lead, staff, manager, director, vp, head, embedded, hardware, firmware,
                     scientist, ml engineer]
     exclude_phrases: [security clearance, ts/sci, top secret, polygraph, background investigation,
-                      us citizen, u.s. citizen, us citizenship, citizenship required, us person required]
+                      us person required]
     exclude_companies: [lensa, beaconfire, dataannotation, speechify, revature, bairesdev, turing,
                         crossover, epictura, fdny, outlier, capital placement]
     exclude_roles:                      # skip when at least min_matches different terms appear
       embedded: {terms: [c++, rtos, firmware, microcontroller, fpga, verilog, bare metal], min_matches: 2}
+  # Optional: a local decision model (Ollama 0.35+, `ollama pull nimble:9b-q4_K_M`) for the questions rules cannot
+  # answer. skip_if reads eligibility lines, so "U.S. citizen" in equal-opportunity text does not skip a job.
+  systemone:
+    model: "nimble:9b-q4_K_M"
+    timeout_s: 30
+    skip_if: [citizenship]              # citizenship and/or clearance
 
 scorers:                                # tried in order; errors and rate limits fall through to the next
   - laya: {model: ~/models/laya_finetuned}   # the fine-tuned folder from Colab, or convaiinnovations/laya
-  - ollama: {model: "gemma4:e4b"}             # local; needs `ollama serve`
+  - ollama: {model: "gemma4:e4b", think: false, temperature: 0}   # local; needs `ollama serve`. num_ctx is optional
   # Optional cloud fallbacks (free tiers; keys in .env, comma-separated to rotate on rate limits):
   # - gemini: {model: gemini-3.5-flash-lite, api_keys_env: GEMINI_API_KEYS}
   # - groq: {model: openai/gpt-oss-120b, api_keys_env: GROQ_API_KEYS}
@@ -71,6 +77,13 @@ cover_letters:                          # a draft letter in each notification, w
 decisions:
   notify_at: 7                          # score >= 7 -> notify
   log_at: 5                             # score 5-6 -> log; below 5 -> skip
+  min_confidence: 0.7                   # a Laya notify it is less sure of is logged instead
+
+schedule:                               # used by scheduler.py and `run --scheduled`; a plain `run` ignores it
+  every: 1h
+  quiet_hours: "22:00-07:00"
+  quiet_days: [sat, sun]
+  timezone: America/New_York
 
 # notify:
 #   slack: {webhook_env: SLACK_WEBHOOK_URL}

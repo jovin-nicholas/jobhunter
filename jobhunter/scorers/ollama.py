@@ -22,6 +22,10 @@ class OllamaScorer:
         url: str = "http://localhost:11434"
         timeout_s: int = 240
         max_description_chars: int = 2000
+        # Thinking models (gemma4, qwen3) otherwise write a hidden essay first: about 4x slower, no better scores.
+        think: bool = False
+        temperature: float = 0.0          # the same posting always gets the same score
+        num_ctx: int | None = None        # Ollama's context window; its default fits the usual prompt
 
     def __init__(self, options: dict):
         self.options = self.Options(**options)
@@ -42,7 +46,11 @@ class OllamaScorer:
 
     def _generate(self, prompt: str, json_format: bool = True) -> str:
         url = f"{self.options.url.rstrip('/')}/api/generate"
-        body = {"model": self.options.model, "prompt": prompt, "stream": False}
+        options = {"temperature": self.options.temperature}
+        if self.options.num_ctx:
+            options["num_ctx"] = self.options.num_ctx
+        body = {"model": self.options.model, "prompt": prompt, "stream": False, "think": self.options.think,
+                "options": options}
         if json_format:
             body["format"] = "json"
         try:

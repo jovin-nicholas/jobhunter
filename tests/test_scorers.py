@@ -129,6 +129,26 @@ class TestOllama(unittest.TestCase):
                 self.scorer().score(JOB, RESUME)
         self.assertIn("not reachable", str(caught.exception))
 
+    def test_thinking_off_and_temperature_zero_by_default(self):
+        with patch("jobhunter.scorers.ollama.requests.post", return_value=FakeResponse(json_data={"response": GOOD})) as post:
+            self.scorer().score(JOB, RESUME)
+        body = post.call_args.kwargs["json"]
+        self.assertIs(body["think"], False)
+        self.assertEqual(body["options"], {"temperature": 0.0})
+
+    def test_thinking_temperature_and_context_are_settings(self):
+        scorer = OllamaScorer({"model": "m", "think": True, "temperature": 0.7, "num_ctx": 8192})
+        with patch("jobhunter.scorers.ollama.requests.post", return_value=FakeResponse(json_data={"response": GOOD})) as post:
+            scorer.score(JOB, RESUME)
+        body = post.call_args.kwargs["json"]
+        self.assertEqual((body["think"], body["options"]), (True, {"temperature": 0.7, "num_ctx": 8192}))
+
+    def test_cover_letters_also_skip_thinking(self):
+        with patch("jobhunter.scorers.ollama.requests.post", return_value=FakeResponse(json_data={"response": "Dear team"})) as post:
+            self.scorer().generate("Write a letter")
+        self.assertNotIn("format", post.call_args.kwargs["json"])
+        self.assertIs(post.call_args.kwargs["json"]["think"], False)
+
 
 
 class TestReviewFixes(unittest.TestCase):

@@ -65,14 +65,34 @@ All optional; they run in this order before any model.
 |---|---|
 | `location.countries` | Keep jobs in these countries: `[US]`, or `{code, names, region_codes}` for one without built-in data (built in: US, CA, GB, IN, DE). A list ("Austin, TX; Toronto, ON") is kept when any place is allowed; a location naming no place ("In-Office") is read from the title, then the description |
 | `seniority.levels` | Title levels to keep: `intern`, `entry`, `mid`, `senior`, `staff` (a title with no level word is kept) |
-| `seniority.max_years_required` | Skip jobs asking for more years than this: "5+ years of … experience"; company history ("over 40 years of experience"), preferred years and years that stand in for a degree do not count |
+| `seniority.max_years_required` | Skip jobs asking for more years than this: "5+ years of … experience"; company history ("over 40 years of experience"), preferred years and years that stand in for a degree do not count. Lines joined by a lone "OR" line are alternatives, so the lowest applies; "typically 5 years" is not a requirement unless a word such as "requires" comes first; "3 5 years" (a range that lost its dash) reads as 3 |
 | `keywords.exclude_title` | Skip when a title contains any of these words |
 | `keywords.exclude_phrases` | Skip when the title or description contains any of these phrases |
 | `keywords.exclude_companies` | Skip these companies |
 | `keywords.exclude_roles` | Groups `{terms: [...], min_matches: N}`: skip when N different terms of a group appear |
-| `systemone` | Off unless set. `{model: nimble:9b-q4_K_M}` (also `url`, `timeout_s: 30`): a local System One model (Ollama 0.35+) asks whether each kept job is a software engineering role, whether it is only for students (when `seniority.levels` leaves out `intern`), and where a job is when the location rules cannot tell. A model that does not answer is noted once in the run log and the job is kept. |
+| `systemone` | Off unless set. `{model: nimble:9b-q4_K_M}` (also `url`, `timeout_s: 30`, `skip_if: []`): a local System One model (Ollama 0.35+). See below. |
 
 Matching is whole-word and case-insensitive.
+
+### systemone
+
+A local decision model answers questions the rules cannot. Each question is its own request about the job only;
+nothing from your resume is sent.
+
+- **Location**: asked inside the location filter, which runs first, and only when the rules cannot tell where a job
+  is ("In-Office", a city the built-in data does not know). If the model does not answer, the rules' result stands,
+  so such a job is still filtered.
+- **Software role**: asked after the other filters for every job they kept: is this a software engineering role?
+- **Students only**: asked when `seniority.levels` is set and leaves out `intern`: is the job only for current
+  students?
+- **`skip_if`**: any of `citizenship` and `clearance`. Asks whether the job requires citizenship of a
+  `location.countries` country, or a security clearance, reading only the lines that mention eligibility or
+  requirements. Equal-opportunity text, work authorisation and sponsorship policies do not count.
+
+A job is skipped when the model's answer is yes with probability 0.5 or more. For the software-role, students and
+`skip_if` questions, a model that does not answer keeps the job. Identical questions are answered from a cache. After
+3 failures in a row the model is not asked again for the rest of the run, and the run log says so once. The model
+stays loaded for 5 minutes after its last question.
 
 ## scorers (required)
 
@@ -81,7 +101,7 @@ Tried in order until one answers; rate limits and errors fall through to the nex
 | Scorer | Options (defaults) |
 |---|---|
 | `laya` | `model` (a local checkpoint folder or a Hugging Face id), `device` (best available) |
-| `ollama` | `model`, `url: http://localhost:11434`, `timeout_s: 240`, `max_description_chars: 2000` |
+| `ollama` | `model`, `url: http://localhost:11434`, `timeout_s: 240`, `max_description_chars: 2000`, `think: false` (thinking models answer about 4x faster), `temperature: 0` (the same posting always gets the same score), `num_ctx` (Ollama's default) |
 | `gemini` | `model: gemini-3.5-flash-lite`, `api_keys_env: GEMINI_API_KEYS`, `min_interval_s: 4`, `timeout_s: 30` |
 | `groq` | `model: openai/gpt-oss-120b`, `api_keys_env: GROQ_API_KEYS`, `min_interval_s: 2.1` |
 
@@ -108,7 +128,8 @@ Used by `scheduler.py` and `run --scheduled` (cron). A plain `run` ignores it.
 
 ## notify
 
-Off unless set. A failed channel is logged and never stops a run.
+Off unless set. A failed channel is logged and never stops a run. When no channel delivers an alert, the job is
+saved as `error_notify` and tried again on later runs, for up to 24 hours after it was first saved.
 
 ```yaml
 notify:

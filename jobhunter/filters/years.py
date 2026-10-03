@@ -33,9 +33,9 @@ CANDIDATE_WORDS = {"you", "your", "you'll", "you've", "candidate", "candidates",
 PREFERRED_AFTER = {"preferred", "plus", "bonus", "desired", "desirable"}
 # "Preferred: 5 years", "Ideally 3+ years": said before the mention. After it ("…, preferably in a startup") these
 # words qualify something else.
-PREFERRED_BEFORE = {"preferred", "bonus", "desired", "desirable", "preferably", "ideally", "nice"}
+PREFERRED_BEFORE = {"preferred", "bonus", "desired", "desirable", "preferably", "ideally", "nice", "typically"}
 # Headings that open a section of optional qualifications, and words that mark a line as a heading.
-PREFERRED_HEADING = {"preferred", "bonus", "desired", "desirable", "plus"}      # and "nice to have"
+PREFERRED_HEADING = {"preferred", "bonus", "desired", "desirable", "plus", "typical"}      # and "nice to have"
 HEADING_WORDS = {"qualifications", "requirements", "required", "basic", "minimum", "preferred", "bonus", "nice", "desired",
                  "responsibilities", "benefits"}
 # "Bachelor's degree or equivalent (minimum 12 years)": years that stand in for a degree.
@@ -168,7 +168,10 @@ def _judge(tokens: list[str], start: int, years_at: int, low: int, company: froz
     before = set(tokens[max(0, start - BEFORE):start])
     if low > MAX_YEARS or set(tokens[years_at + 1:years_at + 4]) & NOT_EXPERIENCE_WORDS:
         return "rejected"
-    if before & PREFERRED_BEFORE or set(_clause_after(tokens, years_at)) & PREFERRED_AFTER:
+    soft = before & PREFERRED_BEFORE
+    if soft == {"typically"} and before & REQUIREMENT_LEADS:
+        soft = set()                # "Typically requires 8+ years" is still a requirement
+    if soft or set(_clause_after(tokens, years_at)) & PREFERRED_AFTER:
         return "rejected"
     if _stands_in_for_a_degree(tokens[:start]):
         return "rejected"
@@ -207,9 +210,12 @@ def required_years(text: str, company: str = "") -> int | None:
     right after its name as the company's history.
     """
     names = frozenset(t for t in _tokens(company) if t.isalpha() and len(t) >= 3) - {"inc", "llc", "ltd", "the", "corp"}
-    required, in_preferred = [], False
+    required, in_preferred, joined = [], False, False
     for sentence in _sentences(text):
         tokens = _tokens(sentence)
+        if [t for t in tokens if t.isalpha()] == ["or"]:
+            joined = True               # a line that only says "OR": the lines around it are alternatives
+            continue
         heading = _heading(sentence, tokens)
         if heading is not None:
             in_preferred = heading
@@ -227,7 +233,11 @@ def required_years(text: str, company: str = "") -> int | None:
             else:
                 groups.append([(low, verdict)])
             previous_end = years_at
-        for group in groups:
-            if any(verdict == "required" for _, verdict in group):
-                required.append(min(low for low, _ in group))
+        found = [min(low for low, _ in group) for group in groups if any(v == "required" for _, v in group)]
+        if found and joined and required:
+            required[-1] = min(required[-1], *found)
+        else:
+            required += found
+        if found:
+            joined = False
     return max(required) if required else None

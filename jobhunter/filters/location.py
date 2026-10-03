@@ -91,6 +91,7 @@ class LocationFilter:
         self.model = model
         countries = " or ".join(spec["names"][0].title() if spec["names"] else code
                                 for code, spec in self.allowed.items())
+        self.countries_text = countries
         self.question = {
             "type": "noul",
             "instructions": f"Is `job` based in {countries}, or open to people working from {countries}?",

@@ -195,3 +195,38 @@ class TestRunLog(unittest.TestCase):
         notes = [line for line in case.logs if line.startswith("systemone:")]
         self.assertEqual(len(notes), 1)
         self.assertIn("refused", notes[0])
+
+
+class TestRequirementChecks(unittest.TestCase):
+    def test_skip_if_parses_and_rejects_unknown_checks(self):
+        s = TestSettings().load('  systemone: {model: nimble, skip_if: [citizenship, clearance]}\n').filters.systemone
+        self.assertEqual(s.skip_if, ["citizenship", "clearance"])
+        self.assertEqual(TestSettings().load("  systemone: {model: nimble}\n").filters.systemone.skip_if, [])
+        with self.assertRaises(SettingsError) as err:
+            TestSettings().load("  systemone: {model: nimble, skip_if: [citizenship, pets]}\n")
+        self.assertIn("filters.systemone.skip_if", "\n".join(err.exception.problems))
+
+    def test_a_required_citizenship_or_clearance_skips_the_job(self):
+        fake = FakeOllama({"software_role": 0.9, "requires_citizenship": 0.95, "requires_clearance": 0.1})
+        f = SystemOneFilter(client(fake), ask_students=False, skip_if=["citizenship", "clearance"], country="the United States")
+        result = f.check(job(description="Requirements\nMust be a U.S. citizen.\n3 years of Python."))
+        self.assertFalse(result.keep)
+        self.assertIn("requires citizenship", result.reason)
+        asked = [list(b["questions"])[0] for _, b, _ in fake.calls]
+        self.assertEqual(asked, ["software_role", "requires_citizenship"])        # stops at the first skip
+        question = fake.calls[1][1]["questions"]["requires_citizenship"]
+        self.assertIn("the United States", question["instructions"])
+        self.assertIn("Must be a U.S. citizen", fake.calls[1][1]["state"]["job"]["requirements"])
+
+    def test_boilerplate_is_left_to_the_model_and_failures_keep_the_job(self):
+        fake = FakeOllama({"software_role": 0.9, "requires_citizenship": 0.05, "requires_clearance": 0.02})
+        f = SystemOneFilter(client(fake), ask_students=False, skip_if=["citizenship", "clearance"], country="the United States")
+        self.assertTrue(f.check(job(description="All qualified applicants, including U.S. citizens, are welcome.")).keep)
+        down = SystemOneFilter(client(FakeOllama(fail=requests.Timeout("slow"))), ask_students=False,
+                               skip_if=["citizenship"], country="the United States")
+        self.assertTrue(down.check(job()).keep)
+
+    def test_build_filters_passes_the_allowed_country(self):
+        filters = build_filters(FilterSettings(location=LocationFilterSettings(["US"]),
+                                               systemone=SystemOneSettings(model="nimble", skip_if=["citizenship"])))
+        self.assertEqual((filters[-1].skip_if, filters[-1].country), (["citizenship"], "United States"))

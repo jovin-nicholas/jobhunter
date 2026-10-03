@@ -336,3 +336,22 @@ class TestRequiredYearsFromLabels(unittest.TestCase):
         f = SeniorityFilter(SeniorityFilterSettings(["entry", "mid"], 3))
         description = "Clients have been working with Genesis10 for 5-20+ years."
         self.assertTrue(f.check(job(title="Python AI Engineer", company="Genesis10", description=description)).keep)
+
+
+class TestRequiredYearsFromBenchmark(unittest.TestCase):
+    """Real fits the years filter dropped in the 500-posting benchmark."""
+
+    def test_alternatives_on_separate_lines_joined_by_or(self):
+        text = ("Basic Qualifications\nBachelor's degree and 2 years of software development experience\nOR\n"
+                "Associate's degree and 6 years of software development experience\nOR\n"
+                "High school diploma / GED and 8 years of software development experience")
+        self.assertEqual(required_years(text), 2)
+        # Without the OR lines they are separate requirements, and the highest counts.
+        self.assertEqual(required_years("- 2 years of Python experience\n- 4 years of SQL experience"), 4)
+
+    def test_typical_experience_is_not_a_requirement(self):
+        self.assertIsNone(required_years("Typical Skills and Experiences:\n"
+                                         "Experience: Typically, six years of experience in technology"))
+        self.assertIsNone(required_years("Typically 6+ years of software engineering experience."))
+        self.assertEqual(required_years("Typical day: you build APIs. Requires 3+ years of experience."), 3)
+        self.assertEqual(required_years("Typically requires 8+ years of experience in the relevant technologies"), 8)

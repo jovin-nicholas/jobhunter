@@ -64,16 +64,18 @@ loads the model, about 5 s).
 ### Optional: a System One checker
 
 A local decision model can answer the questions the filters cannot: is this a software engineering role, is it only for
-current students, and where is a job whose location names no place. Install Ollama 0.35 or later, run
+current students, where is a job whose location names no place, and (optionally) does it require citizenship or a
+security clearance. Install Ollama 0.35 or later, run
 `ollama pull nimble:9b-q4_K_M` (5.6 GB), and add one line under `filters:`:
 
 ```yaml
-  systemone: {model: "nimble:9b-q4_K_M"}
+  systemone: {model: "nimble:9b-q4_K_M", skip_if: [citizenship, clearance]}   # skip_if is optional
 ```
 
 Each question is a separate request about the job only (nothing from your resume is sent), about 3-5 seconds each
-on an Apple-silicon Mac, asked only for jobs the other filters kept. If the model is missing or slow, the run log
-says so once and jobs go on to the scorers as usual.
+on an Apple-silicon Mac. The location question is asked only when the location rules cannot decide; the others only
+for jobs the other filters kept. If the model is missing or slow, the run log says so once and jobs go on to the
+scorers as usual. Details are in [docs/settings.md](docs/settings.md#systemone).
 
 ## Boards
 
@@ -129,8 +131,9 @@ that also has `generate(prompt) -> str` can write cover letters.
 Each job is saved in `data/jobs.db` with a status: `notified`, `logged` or `skipped` (the score against
 `decisions`), `filtered` (with the filter's reason), `stale` or `gone` (a discovered posting too old, or no longer
 there), `duplicate` (would have been notified, but the same job was already notified in the last 30 days or earlier in
-the run), `error_429_retry` / `error_unavailable` / `error_notify` (retried on the next run; `error_notify` means no Slack or email
-channel delivered the alert), or `error_terminal` (no scorer could read its answer for this job; not retried).
+the run), `error_429_retry` (scored again when a board lists it again), `error_unavailable` / `error_notify` (tried again on
+later runs for up to 24 hours after first being saved; `error_notify` means no Slack or email channel delivered the
+alert), or `error_terminal` (no scorer could read its answer for this job; not retried).
 
 A job is notified once: the same title at the same company counts as one job whatever board, id or location it comes
 with.

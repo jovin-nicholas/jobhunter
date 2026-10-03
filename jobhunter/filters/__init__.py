@@ -34,5 +34,8 @@ def build_filters(settings: FilterSettings) -> list[Filter]:
     if model is not None:
         # The students question only matters when internships are not wanted.
         levels = settings.seniority.levels if settings.seniority is not None else None
-        filters.append(SystemOneFilter(model, ask_students=levels is not None and "intern" not in levels))
+        location = next((f for f in filters if isinstance(f, LocationFilter)), None)
+        filters.append(SystemOneFilter(model, ask_students=levels is not None and "intern" not in levels,
+                                       skip_if=list(settings.systemone.skip_if),
+                                       country=location.countries_text if location else "the country where the job is based"))
     return filters

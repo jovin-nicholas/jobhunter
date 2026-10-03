@@ -80,12 +80,16 @@ class KeywordFilterSettings:
     exclude_roles: dict[str, RoleGroup] = field(default_factory=dict)
 
 
+SYSTEMONE_CHECKS = ("citizenship", "clearance")
+
+
 @dataclass
 class SystemOneSettings:
     """A local System One decision model (Ollama 0.35+) for the questions the filters cannot answer."""
     model: str
     url: str = "http://localhost:11434"
     timeout_s: int = 30
+    skip_if: list[str] = field(default_factory=list)    # "citizenship", "clearance": requirements to skip jobs for
 
 
 @dataclass
@@ -370,7 +374,7 @@ def _filters(c: _Checker, raw: Any) -> FilterSettings:
         )
     if "systemone" in raw:
         key = "filters.systemone"
-        r = c.mapping(key, raw["systemone"], {"model", "url", "timeout_s"})
+        r = c.mapping(key, raw["systemone"], {"model", "url", "timeout_s", "skip_if"})
         model = r.get("model")
         if not isinstance(model, str) or not model.strip():
             c.add(f"{key}.model", "missing: the Ollama model to ask, e.g. nimble:9b-q4_K_M")
@@ -382,7 +386,11 @@ def _filters(c: _Checker, raw: Any) -> FilterSettings:
         timeout = SystemOneSettings.timeout_s
         if "timeout_s" in r:
             timeout = c.integer(f"{key}.timeout_s", r["timeout_s"], minimum=1) or timeout
-        out.systemone = SystemOneSettings(model, url, timeout)
+        skip_if = c.strings(f"{key}.skip_if", r.get("skip_if"))
+        unknown = [x for x in skip_if if x not in SYSTEMONE_CHECKS]
+        if unknown:
+            c.add(f"{key}.skip_if", f"unknown check {', '.join(unknown)} (allowed: {', '.join(SYSTEMONE_CHECKS)})")
+        out.systemone = SystemOneSettings(model, url, timeout, [x for x in skip_if if x in SYSTEMONE_CHECKS])
     return out
 
 
