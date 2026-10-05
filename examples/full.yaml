@@ -65,6 +65,12 @@ filters:                                # run before any model, in this order
                         crossover, epictura, fdny, outlier, capital placement]
     exclude_roles:                      # skip when at least min_matches different terms appear
       embedded: {terms: [c++, rtos, firmware, microcontroller, fpga, verilog, bare metal], min_matches: 2}
+  # Optional: no board reports employment type, so this reads the title and description for contract or hourly-pay
+  # wording ("contractor", "$55/hr", "6-month contract", "employment type: contract").
+  employment:
+    exclude: [contract, hourly]         # either or both; required
+    contract_to_hire: exclude           # keep | exclude (default keep); "contract to hire", "cth", "temp to perm"
+    hourly_internships: keep            # keep | exclude (default keep); interns are usually paid hourly
   # Optional: a local decision model (Ollama 0.35+, `ollama pull nimble:9b-q4_K_M`) for the questions rules cannot
   # answer. skip_if reads eligibility lines, so "U.S. citizen" in equal-opportunity text does not skip a job.
   systemone:
@@ -101,4 +107,5 @@ schedule:                               # used by scheduler.py and `run --schedu
 
 # notify:
 #   slack: {webhook_env: SLACK_WEBHOOK_URL}
-#   email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD, to_env: NOTIFY_EMAIL}
+#   email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD,  # to_env: NOTIFY_EMAIL (optional)
+#           alert_tag: jobhunter, feedback_tag: jobhunter-feedback}      # plus tags for alerts and feedback buttons

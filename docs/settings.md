@@ -70,9 +70,14 @@ All optional; they run in this order before any model.
 | `keywords.exclude_phrases` | Skip when the title or description contains any of these phrases |
 | `keywords.exclude_companies` | Skip these companies |
 | `keywords.exclude_roles` | Groups `{terms: [...], min_matches: N}`: skip when N different terms of a group appear |
+| `employment.exclude` | `[contract, hourly]`: either or both, required. No board reports employment type, so this reads the title and description for contract or hourly-pay wording instead |
+| `employment.contract_to_hire` | `keep` (default) or `exclude`: whether "contract to hire", "cth" and "temp to perm"/"temp to hire" wording skips a job on their own |
+| `employment.hourly_internships` | `keep` (default) or `exclude`: whether an hourly rate skips a job whose title says intern, internship or co-op |
 | `systemone` | Off unless set. `{model: nimble:9b-q4_K_M}` (also `url`, `timeout_s: 30`, `skip_if: []`): a local System One model (Ollama 0.35+). See below. |
 
-Matching is whole-word and case-insensitive.
+Matching is whole-word and case-insensitive. `employment` looks for signals such as "contractor", "c2c", "1099",
+"$55/hr", "6-month contract" or "employment type: contract"; it does not skip on the bare word "contracts" ("vendor
+contracts", "smart contracts"), only on the employment-type wording above.
 
 ### systemone
 
@@ -100,7 +105,7 @@ Tried in order until one answers; rate limits and errors fall through to the nex
 
 | Scorer | Options (defaults) |
 |---|---|
-| `laya` | `model` (a Hugging Face id, downloaded on first use, or a fine-tuned checkpoint folder), `device` (best available) |
+| `laya` | `model` (a Hugging Face id, downloaded on first use, or a fine-tuned checkpoint folder), `device` (best available); for a checkpoint trained on the alert question, `alert_at` and `save_at` override its stored cut-offs (0-1, `save_at` below `alert_at`; any override that breaks `0 < save_at < alert_at < 1` is a settings error, including `alert_at` without `save_at` on a checkpoint that stores none). For a checkpoint trained on the questions method, `stack_roles` (the roles that pass the role gate, from backend, frontend, fullstack, ai, data, infra, other), `dealbreaker_at` (skip when the dealbreaker chance is at least this, above 0 and at most 1), `summary` (`expected`, a 1-10 score, or `p_good`, the chance of a 7-10) and `alert_at` / `save_at` (1-10 for `expected`, 0-1 for `p_good`, `save_at` below `alert_at`) override the checkpoint's; changing `summary` needs both `alert_at` and `save_at`, and an unknown role or out-of-range value is a settings error. Setting `alert_at` or `save_at` on a checkpoint trained on neither the alert question nor the questions method, or the questions options on any other checkpoint, is also a settings error |
 | `ollama` | `model` (any pulled Ollama model; see the README's Ollama section), `url: http://localhost:11434`, `timeout_s: 240`, `max_description_chars: 2000`, `think: false` (thinking models answer about 4x faster), `temperature: 0` (the same posting always gets the same score), `num_ctx` (Ollama's default) |
 | `gemini` | `model: gemini-3.5-flash-lite`, `api_keys_env: GEMINI_API_KEYS`, `min_interval_s: 4`, `timeout_s: 30` |
 | `groq` | `model: openai/gpt-oss-120b`, `api_keys_env: GROQ_API_KEYS`, `min_interval_s: 2.1` |
@@ -114,6 +119,9 @@ Several cloud keys can be listed comma-separated in `.env`; a rate-limited key r
 | `notify_at` | 7 | A score of at least this is notified |
 | `log_at` | 5 | At least this (and below `notify_at`) is logged; lower is skipped |
 | `min_confidence` | none | Laya also reports how sure it is, from 0 to 1. A job that reaches `notify_at` but whose confidence is below this is logged instead of sent. Scorers without a confidence (Ollama, Gemini, Groq) are not affected |
+
+For a Laya checkpoint trained on the alert question, its own cut-offs decide; `notify_at`, `log_at` and
+`min_confidence` apply to scorers that return a 1-10 score.
 
 ## schedule
 
@@ -136,6 +144,24 @@ notify:
   slack: {webhook_env: SLACK_WEBHOOK_URL}
   email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD, to_env: NOTIFY_EMAIL}
 ```
+
+`email` needs `from_env` and `password_env` (a Gmail app password). `to_env` is optional: when it is left out, alerts
+go to the sending account's plus address `you+<alert_tag>@gmail.com`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `to_env` | none | Where alerts go. Left out: the alert plus address below |
+| `alert_tag` | `jobhunter` | Plus tag for alerts, so a Gmail filter can label them |
+| `feedback_tag` | `jobhunter-feedback` | Plus tag the feedback buttons send to; must differ from `alert_tag` |
+
+Tags may only contain letters, digits, `-` and `_`.
+
+Each alert email has four buttons: ✅ Applied, 👍 Good, 🤷 Maybe and 👎 Bad match. A button opens a pre-filled email to
+`you+<feedback_tag>@gmail.com` on the sending account; send it. On the next run jobhunter reads it over IMAP with the
+same app password, saves the verdict in `data/jobs.db`, and moves the message out of the inbox under the label
+`jobhunter/feedback`. Only messages from the sending account, or from the `to_env` address, count. `--dry-run` never
+reads the inbox, and a problem reading it is logged and never stops alerts. `jobhunter export-feedback` writes the
+verdicts as training labels: Applied and Good become notify, Maybe log, Bad match skip.
 
 ## cover_letters
 

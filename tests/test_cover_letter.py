@@ -149,5 +149,6 @@ class TestNotifierLetter(unittest.TestCase):
             Notifier(BOTH, env=ENV).send(JOB, RESULT, "backend.txt", cover_letter="Dear team, hello.")
         self.assertIn("Dear team, hello.", post.call_args.kwargs["json"]["text"])
         raw = smtp.__enter__.return_value.sendmail.call_args.args[2]
-        body = email.message_from_string(raw).get_payload(decode=True).decode("utf-8")   # the body is base64
-        self.assertIn("Dear team, hello.", body)
+        for part in email.message_from_string(raw).walk():                     # plain and HTML parts, base64
+            if not part.is_multipart():
+                self.assertIn("Dear team, hello.", part.get_payload(decode=True).decode("utf-8"), part.get_content_type())

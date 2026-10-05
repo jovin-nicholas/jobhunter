@@ -31,14 +31,27 @@ class Resume:
 
 @dataclass
 class ScoreResult:
-    score: int                    # 1-10
+    score: float | None            # 1-10 (Laya's questions method keeps its decimals); None for a probability
     model: str
-    decision: str = ""            # set by the scorer chain from the configured thresholds
+    decision: str = ""            # set by the scorer chain from the thresholds, unless the scorer decided itself
     reasoning: str = ""
     matched_skills: list[str] = field(default_factory=list)
     keyword_gaps: list[str] = field(default_factory=list)
     role_type: str | None = None
     confidence: float | None = None
+    probability: float | None = None   # P(good fit), for a scorer that answers yes/no
+    label: str = ""                # how the result reads, when the score alone would misstate the decision
+
+
+def score_label(result: ScoreResult) -> str:
+    """How a result reads in alerts and logs: "8/10", "fit 72%" for a probability, or "n/a" for neither."""
+    if result.label:
+        return result.label
+    if result.score is None and result.probability is None:
+        return "n/a"
+    if result.score is None and result.probability is not None:
+        return f"fit {result.probability:.0%}"
+    return f"{result.score}/10"
 
 
 @dataclass(frozen=True)

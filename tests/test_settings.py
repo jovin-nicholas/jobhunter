@@ -183,3 +183,33 @@ class TestLeanSettings(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNotifyEmail(unittest.TestCase):
+    ENV = {"SLACK_WEBHOOK_URL": "https://hooks.example/x", "GMAIL_ADDRESS": "sender@example.com",
+           "GMAIL_APP_PASSWORD": "app-pass"}
+
+    def load(self, email):
+        text = VALID.replace("notify:\n  slack: {webhook_env: SLACK_WEBHOOK_URL}\n", f"notify:\n  email: {email}\n")
+        return load_settings(write_project(Path(tempfile.mkdtemp()).resolve(), text, RESUMES), env=self.ENV)
+
+    def problems(self, email):
+        with self.assertRaises(SettingsError) as e:
+            self.load(email)
+        return e.exception.problems
+
+    def test_to_env_is_optional_and_tags_are_kept(self):
+        s = self.load("{from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD, alert_tag: jobs, feedback_tag: jobs-fb}")
+        self.assertEqual(s.notify.email["alert_tag"], "jobs")
+        self.assertNotIn("to_env", s.notify.email)
+
+    def test_bad_tags_are_reported(self):
+        for tags, problem in (("alert_tag: 'a b'", "alert_tag"), ("alert_tag: x, feedback_tag: x", "must differ"),
+                              ("feedback_tag: 'a+b'", "feedback_tag"), ("alert_tag: jobhunter-feedback", "must differ")):
+            with self.subTest(tags=tags):
+                found = self.problems(f"{{from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD, {tags}}}")
+                self.assertTrue(any(problem in p for p in found), found)
+
+    def test_from_and_password_stay_required(self):
+        found = self.problems("{from_env: GMAIL_ADDRESS}")
+        self.assertTrue(any("missing password_env" in p for p in found), found)

@@ -113,6 +113,60 @@ class TestEnvExample(unittest.TestCase):
         from dotenv import dotenv_values
         self.assertIsNone(dotenv_values(ROOT / ".env.example").get("CANDIDATE_NAMES"))
 
+class TestFeedbackCommands(unittest.TestCase):
+    def setUp(self):
+        from jobhunter.models import Job, ScoreResult
+        from jobhunter.store import Store
+        self.tmp = Path(tempfile.mkdtemp())
+        self.path = write_project(self.tmp, SETTINGS, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        self.store = Store(self.tmp / "data" / "jobs.db")
+        self.store.save(Job("dice_1", "Backend Engineer", "Acme", "Austin", "https://e/1", source="dice"), "notified",
+                        ScoreResult(score=8, model="fixed"), resume_id="backend.txt")
+
+    def test_export_feedback_writes_label_columns(self):
+        self.store.add_feedback([{"job_id": "dice_1", "verdict": "maybe", "received_at": "2026-10-05T10:00:00+00:00",
+                                  "message_id": "<a>"}])
+        out = self.tmp / "fb.csv"
+        code, stdout, _ = cli("--settings", str(self.path), "export-feedback", "--out", str(out))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.read_text().splitlines(), [
+            "job_id,job_title,company,decision,verdict,received_at",
+            "dice_1,Backend Engineer,Acme,log,maybe,2026-10-05T10:00:00+00:00"])
+        self.assertIn("wrote 1 verdict", stdout)
+
+    def test_export_feedback_rejects_a_bad_date(self):
+        code, _, err = cli("--settings", str(self.path), "export-feedback", "--since", "yesterday")
+        self.assertEqual(code, 2)
+        self.assertIn("YYYY-MM-DD", err)
+
+    def test_send_test_alert_needs_email(self):
+        code, _, err = cli("--settings", str(self.path), "send-test-alert")
+        self.assertEqual(code, 2)
+        self.assertIn("notify.email", err)
+
+    def test_send_test_alert_sends_the_last_notified_job(self):
+        from unittest.mock import patch
+        self.path.write_text(SETTINGS + "notify:\n  email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD}\n")
+        with patch.dict("os.environ", {"GMAIL_ADDRESS": "sender@example.com", "GMAIL_APP_PASSWORD": "x"}), \
+             patch("jobhunter.__main__.Notifier") as notifier:
+            notifier.return_value.send.return_value = True
+            code, out, err = cli("--settings", str(self.path), "send-test-alert")
+        self.assertEqual(code, 0, err)
+        job, result, resume_id = notifier.return_value.send.call_args.args
+        self.assertEqual((job.id, result.score, resume_id), ("dice_1", 8, "backend.txt"))
+        self.assertIsNone(notifier.call_args.args[0].slack)          # email only
+        self.assertIn("sent a test alert", out)
+
+    def test_run_never_opens_imap_on_a_dry_run(self):
+        from unittest.mock import patch
+        self.path.write_text(SETTINGS + "notify:\n  email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD}\n")
+        with patch.dict("os.environ", {"GMAIL_ADDRESS": "sender@example.com", "GMAIL_APP_PASSWORD": "x"}), \
+             patch("jobhunter.inbox.imaplib.IMAP4_SSL") as imap:
+            code, _, _ = cli("--settings", str(self.path), "run", "--dry-run")
+        self.assertEqual(code, 0)
+        imap.assert_not_called()
+
+
 
 if __name__ == "__main__":
     unittest.main()

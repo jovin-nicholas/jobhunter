@@ -1,8 +1,11 @@
 """Command line: python -m jobhunter [--settings PATH] run | check-config | list-boards | list-scorers | import-db PATH |
-compare-db PATH"""
+compare-db PATH | export-feedback | send-test-alert"""
 from __future__ import annotations
 
 import argparse
+import csv
+import os
+import re
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -15,11 +18,12 @@ from dotenv import load_dotenv
 from jobhunter.compare import compare, report
 from jobhunter.errors import SettingsError
 from jobhunter.importer import import_db
+from jobhunter.inbox import read_feedback
 from jobhunter.notify import Notifier
 from jobhunter.pipeline import bootstrap, run
 from jobhunter.registry import build_registry
 from jobhunter.schedule import is_due, is_quiet, local_time, next_due, read_last_run, write_last_run
-from jobhunter.settings import load_settings
+from jobhunter.settings import NotifySettings, load_settings
 from jobhunter.store import Store
 
 
@@ -135,6 +139,38 @@ def run_lock(path: Path):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def _export_feedback(store: Store, out: str, since: str | None) -> int:
+    """Each job's latest verdict, in label_overrides.csv's columns plus the verdict and when it was given."""
+    if since and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+        print("jobhunter: --since must be a date like 2026-10-05 (YYYY-MM-DD)", file=sys.stderr)
+        return 2
+    rows = store.latest_feedback(since)
+    columns = ["job_id", "job_title", "company", "decision", "verdict", "received_at"]
+    with open(out, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columns, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows({c: r[c] for c in columns} for r in rows)
+    print(f"wrote {len(rows)} verdict(s) to {out}")
+    return 0
+
+
+def _send_test_alert(settings: Any, store: Store) -> int:
+    if not settings.notify.email:
+        print("jobhunter: send-test-alert needs notify.email in the settings", file=sys.stderr)
+        return 2
+    last = store.last_notified()
+    if last is None:
+        print("jobhunter: no notified job yet; run jobhunter until one alert has been sent", file=sys.stderr)
+        return 2
+    job, result, resume_id = last
+    sent = Notifier(NotifySettings(email=settings.notify.email)).send(job, result, resume_id)
+    if not sent:
+        print("jobhunter: the test alert could not be sent", file=sys.stderr)
+        return 1
+    print(f"sent a test alert for {job.title} at {job.company}")
+    return 0
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -156,6 +192,10 @@ def main(argv: list[str] | None = None) -> int:
     cmp_cmd = sub.add_parser("compare-db", help="compare decisions with a job-notifier database, job by job")
     cmp_cmd.add_argument("path", help="path to job-notifier's data/jobs.db (opened read-only)")
     cmp_cmd.add_argument("--since", help="only jobs jobhunter handled on or after this date (YYYY-MM-DD)")
+    exp = sub.add_parser("export-feedback", help="write feedback verdicts from alert buttons as training labels (CSV)")
+    exp.add_argument("--out", default="feedback_labels.csv", help="output file (default: ./feedback_labels.csv)")
+    exp.add_argument("--since", help="only verdicts on or after this date (YYYY-MM-DD)")
+    sub.add_parser("send-test-alert", help="email yourself an alert for the last notified job, to try the buttons")
     args = parser.parse_args(argv)
 
     settings_path = Path(args.settings).expanduser().resolve()
@@ -192,6 +232,16 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
 
+    if args.command in ("export-feedback", "send-test-alert"):
+        try:
+            settings = load_settings(settings_path)
+        except SettingsError as e:
+            return _print_problems(e.problems)
+        store = Store(settings.data_dir / "jobs.db")
+        if args.command == "export-feedback":
+            return _export_feedback(store, args.out, args.since)
+        return _send_test_alert(settings, store)
+
     try:
         app = bootstrap(settings_path)
     except SettingsError as e:
@@ -201,6 +251,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Settings OK: {len(app.boards)} board(s) ({', '.join(app.boards) or 'none enabled'}), "
               f"scorers in order: {', '.join(name for name, _ in app.chain.scorers)}, "
               f"resumes: {', '.join(app.resumes.resumes)}")
+        for _, scorer in app.chain.scorers:
+            line = scorer.describe() if callable(getattr(scorer, "describe", None)) else None
+            if line:
+                print(line)
         for note in model_notes(app):
             print(f"note: {note}")
         if not app.resumes.names:
@@ -222,14 +276,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"skipped: next run due at {local_time(schedule, next_due(schedule, last_run)):%Y-%m-%d %H:%M}")
             return 0
     store = Store(app.settings.data_dir / "jobs.db")
+    feedback = (lambda: read_feedback(app.settings.notify, os.environ, store)) if app.settings.notify.email else None
     if args.dry_run:
-        run(app, store, Notifier(app.settings.notify), only=only, dry_run=True)
+        run(app, store, Notifier(app.settings.notify), only=only, dry_run=True, feedback=feedback)
         return 0
     with run_lock(app.settings.data_dir / "run.lock") as locked:
         if not locked:
             print("skipped: another run is in progress")
             return 0
-        run(app, store, Notifier(app.settings.notify), only=only, dry_run=False)
+        run(app, store, Notifier(app.settings.notify), only=only, dry_run=False, feedback=feedback)
         write_last_run(last_run_path, started)
     return 0
 

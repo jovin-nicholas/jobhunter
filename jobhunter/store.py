@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from jobhunter.feedback import VERDICTS
 from jobhunter.models import Job, ScoreResult
 
 # Jobs in these statuses are finished and never processed again; anything else is retried on the next run.
@@ -19,7 +20,7 @@ COLUMNS = {
     "resume_version": "TEXT", "match_reasoning": "TEXT", "matched_skills": "TEXT", "keyword_gaps": "TEXT",
     "seniority_fit": "TEXT", "role_type": "TEXT", "ats_tip": "TEXT", "status": "TEXT DEFAULT 'pending'",
     "run_at": "TEXT", "source_model": "TEXT", "jd_is_snippet": "INTEGER", "resume_id": "TEXT",
-    "filter_reason": "TEXT", "first_run_at": "TEXT",
+    "filter_reason": "TEXT", "first_run_at": "TEXT", "fit_probability": "REAL",
 }
 _SAVED = [c for c in COLUMNS if c not in ("resume_version", "seniority_fit", "ats_tip")]
 _CHUNK = 900   # SQLite allows at most 999 bound parameters per statement
@@ -35,6 +36,9 @@ class Store:
             for column, sql_type in COLUMNS.items():
                 if column not in existing:
                     conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {sql_type.replace(' PRIMARY KEY', '')}")
+            conn.execute("CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                         "job_id TEXT NOT NULL, verdict TEXT NOT NULL, received_at TEXT NOT NULL, "
+                         "message_id TEXT NOT NULL UNIQUE)")
 
     @contextmanager
     def _connect(self):
@@ -90,6 +94,7 @@ class Store:
             "jd_is_snippet": None if job.description_is_snippet is None else int(job.description_is_snippet),
             "resume_id": resume_id, "filter_reason": filter_reason,
             "first_run_at": datetime.now(timezone.utc).isoformat(),
+            "fit_probability": result.probability if result else None,
         }
         # first_run_at keeps the time a job was first saved, so retries of a refused job are bounded in time.
         updates = ", ".join(f"{c} = excluded.{c}" for c in _SAVED if c not in ("id", "first_run_at"))
@@ -124,6 +129,49 @@ class Store:
             before = conn.total_changes
             conn.executemany(sql, [tuple(r.get(c) for c in columns) + (r["id"],) for r in rows])
             return conn.total_changes - before
+
+    def add_feedback(self, rows: list[dict]) -> list[dict]:
+        """Save feedback verdicts; a message already saved (same message_id) is ignored. Returns the new rows."""
+        new = []
+        with self._connect() as conn:
+            for r in rows:
+                before = conn.total_changes
+                conn.execute("INSERT OR IGNORE INTO feedback (job_id, verdict, received_at, message_id) "
+                             "VALUES (?, ?, ?, ?)", (r["job_id"], r["verdict"], r["received_at"], r["message_id"]))
+                if conn.total_changes > before:
+                    new.append(r)
+        return new
+
+    def latest_feedback(self, since: str | None = None) -> list[dict]:
+        """Each job's latest verdict with its title and company, oldest first; `since` is a date or ISO time."""
+        sql = ("SELECT f.job_id, j.title, j.company, f.verdict, f.received_at FROM feedback f "
+               "LEFT JOIN jobs j ON j.id = f.job_id WHERE f.id = (SELECT g.id FROM feedback g WHERE g.job_id = "
+               "f.job_id ORDER BY g.received_at DESC, g.id DESC LIMIT 1)")
+        params: list = []
+        if since:
+            sql += " AND f.received_at >= ?"
+            params.append(since)
+        with self._connect() as conn:
+            rows = conn.execute(sql + " ORDER BY f.received_at, f.id", params).fetchall()
+        return [{"job_id": i, "job_title": t or "", "company": c or "", "verdict": v,
+                 "decision": VERDICTS.get(v, ""), "received_at": at} for i, t, c, v, at in rows]
+
+    def last_notified(self) -> tuple[Job, ScoreResult, str] | None:
+        """The most recently notified job with its saved score, for send-test-alert."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, title, company, location, url, jd_text, posted_at, source, ats_system, match_score, "
+                "source_model, match_reasoning, matched_skills, keyword_gaps, role_type, fit_probability, resume_id "
+                "FROM jobs WHERE status = 'notified' ORDER BY run_at DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        (i, t, c, loc, url, jd, posted, src, ats, score, model, why, skills, gaps, role, prob, resume_id) = row
+        job = Job(i, t or "", c or "", loc or "", url or "", description=jd or "", posted_at=posted or "",
+                  source=src or "", ats=ats or "")
+        result = ScoreResult(score=score, model=model or "", decision="notify", reasoning=why or "",
+                             matched_skills=json.loads(skills or "[]"), keyword_gaps=json.loads(gaps or "[]"),
+                             role_type=role, probability=prob)
+        return job, result, resume_id or ""
 
     def recently_notified(self, within_days: int = 30) -> list[tuple[str, str]]:
         """(title, company) of every job notified in the last `within_days`."""

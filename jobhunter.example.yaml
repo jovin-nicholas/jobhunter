@@ -20,6 +20,11 @@ filters:                                # applied before any model scores a job
 
 scorers:                                # tried in order until one answers
   - laya: {model: convaiinnovations/laya}    # downloaded on the first run; or a fine-tuned folder (README: Laya)
+    # alert_at: 0.6   # alert checkpoints (0-1) or questions checkpoints (1-10, or 0-1 for p_good): override the
+    # save_at: 0.3    # checkpoint's cut-offs
+    # stack_roles: [backend, fullstack, ai, data]   # questions checkpoints only: the gates and fit summary
+    # dealbreaker_at: 0.5
+    # summary: expected                             # or p_good
   - ollama: {model: "gemma4:e4b"}             # local fallback: any model that fits your computer (README: Ollama);
                                               # run `ollama pull gemma4:e4b` first
 

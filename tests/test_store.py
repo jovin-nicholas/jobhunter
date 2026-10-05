@@ -67,5 +67,65 @@ class TestUnavailableIsRetried(unittest.TestCase):
         self.assertEqual([j.id for j in store.filter_unseen([job(1)])], ["dice_1"])
 
 
+class TestProbability(unittest.TestCase):
+    def test_probability_is_stored_and_score_left_empty(self):
+        store = Store(Path(tempfile.mkdtemp()) / "jobs.db")
+        store.save(job(1), "notified", ScoreResult(score=None, model="laya", decision="notify", probability=0.81))
+        with closing(sqlite3.connect(store.path)) as conn:
+            self.assertEqual(conn.execute("select match_score, fit_probability from jobs").fetchone(), (None, 0.81))
+
+    def test_a_decimal_score_keeps_its_decimals(self):
+        store = Store(Path(tempfile.mkdtemp()) / "jobs.db")
+        store.save(job(1), "notified", ScoreResult(score=6.5432, model="laya", decision="notify", probability=0.55))
+        with closing(sqlite3.connect(store.path)) as conn:
+            self.assertEqual(conn.execute("select match_score from jobs").fetchone(), (6.5432,))
+
+    def test_existing_database_gains_fit_probability(self):
+        path = Path(tempfile.mkdtemp()) / "jobs.db"
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, title TEXT, status TEXT)")
+            conn.execute("INSERT INTO jobs VALUES ('a', 'Old', 'notified')")
+            conn.commit()
+        Store(path)
+        with closing(sqlite3.connect(path)) as conn:
+            self.assertEqual(conn.execute("select fit_probability from jobs where id='a'").fetchone(), (None,))
+
+class TestFeedback(unittest.TestCase):
+    def setUp(self):
+        self.store = Store(Path(tempfile.mkdtemp()) / "jobs.db")
+        self.store.save(Job("dice_1", "Backend Engineer", "Acme", "Austin", "https://e/1", source="dice"), "notified",
+                        ScoreResult(score=8, model="laya", reasoning="fits", matched_skills=["go"]),
+                        resume_id="backend.txt")
+
+    def row(self, verdict, at, mid, job_id="dice_1"):
+        return {"job_id": job_id, "verdict": verdict, "received_at": at, "message_id": mid}
+
+    def test_duplicates_are_ignored_and_latest_wins(self):
+        new = self.store.add_feedback([self.row("maybe", "2026-10-05T10:00:00+00:00", "<a>"),
+                                       self.row("good", "2026-10-05T11:00:00+00:00", "<b>")])
+        self.assertEqual(len(new), 2)
+        self.assertEqual(self.store.add_feedback([self.row("maybe", "2026-10-05T10:00:00+00:00", "<a>")]), [])
+        self.assertEqual(self.store.latest_feedback(), [{"job_id": "dice_1", "job_title": "Backend Engineer",
+                                                         "company": "Acme", "verdict": "good", "decision": "notify",
+                                                         "received_at": "2026-10-05T11:00:00+00:00"}])
+
+    def test_since_filters(self):
+        self.store.add_feedback([self.row("bad", "2026-10-01T10:00:00+00:00", "<a>")])
+        self.assertEqual(self.store.latest_feedback(since="2026-10-02"), [])
+        self.assertEqual(len(self.store.latest_feedback(since="2026-10-01")), 1)
+
+    def test_table_is_added_to_an_existing_database(self):
+        Store(self.store.path)                      # reopening must not fail or drop rows
+        self.store.add_feedback([self.row("bad", "2026-10-01T10:00:00+00:00", "<a>")])
+        self.assertEqual(len(Store(self.store.path).latest_feedback()), 1)
+
+    def test_last_notified(self):
+        job, result, resume_id = self.store.last_notified()
+        self.assertEqual((job.id, job.title, result.score, result.matched_skills, resume_id),
+                         ("dice_1", "Backend Engineer", 8, ["go"], "backend.txt"))
+        self.assertIsNone(Store(Path(tempfile.mkdtemp()) / "jobs.db").last_notified())
+
+
+
 if __name__ == "__main__":
     unittest.main()

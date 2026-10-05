@@ -172,6 +172,25 @@ class TestOllama(unittest.TestCase):
 
 
 
+class GivesDecision:
+    def score(self, job, resume):
+        return ScoreResult(score=None, model="alert", decision="log", probability=0.4, confidence=0.1)
+
+
+class TestChainKeepsScorerDecision(unittest.TestCase):
+    def test_a_scorers_own_decision_is_used_as_given(self):
+        chain = ScorerChain([("laya", GivesDecision())], Decisions(notify_at=8, log_at=5, min_confidence=0.7))
+        out = chain.score(JOB, RESUME)
+        self.assertEqual((out.status, out.result.decision), ("scored", "log"))
+
+    def test_scored_results_still_use_the_thresholds(self):
+        class Eight:
+            def score(self, job, resume):
+                return ScoreResult(score=8, model="x", confidence=0.5)
+        out = ScorerChain([("x", Eight())], Decisions(notify_at=8, log_at=5, min_confidence=0.7)).score(JOB, RESUME)
+        self.assertEqual(out.result.decision, "log")      # notify, but less sure than min_confidence
+
+
 class TestReviewFixes(unittest.TestCase):
     def test_an_unavailable_scorer_is_retried_on_the_next_run(self):
         from jobhunter.errors import ScorerUnavailable

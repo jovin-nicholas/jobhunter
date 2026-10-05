@@ -16,6 +16,7 @@ class Filter(Protocol):
 
 def build_filters(settings: FilterSettings) -> list[Filter]:
     """Filters in run order; raises SettingsError for problems only detectable here (unknown country codes)."""
+    from jobhunter.filters.employment import EmploymentFilter
     from jobhunter.filters.keywords import KeywordFilter
     from jobhunter.filters.location import LocationFilter
     from jobhunter.filters.seniority import SeniorityFilter
@@ -31,6 +32,8 @@ def build_filters(settings: FilterSettings) -> list[Filter]:
         filters.append(SeniorityFilter(settings.seniority))
     if settings.keywords is not None:
         filters.append(KeywordFilter(settings.keywords))
+    if settings.employment is not None:
+        filters.append(EmploymentFilter(settings.employment))
     if model is not None:
         # The students question only matters when internships are not wanted.
         levels = settings.seniority.levels if settings.seniority is not None else None

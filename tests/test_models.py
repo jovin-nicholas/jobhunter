@@ -1,6 +1,6 @@
 import unittest
 
-from jobhunter.models import KEEP, Job, decide, skip
+from jobhunter.models import KEEP, Job, ScoreResult, decide, score_label, skip
 
 
 class TestDecide(unittest.TestCase):
@@ -25,6 +25,19 @@ class TestFilterResults(unittest.TestCase):
         self.assertTrue(KEEP.keep)
         result = skip("too senior")
         self.assertEqual((result.keep, result.reason), (False, "too senior"))
+
+
+class TestScoreLabel(unittest.TestCase):
+    def test_score_and_probability_labels(self):
+        self.assertEqual(score_label(ScoreResult(score=8, model="m")), "8/10")
+        self.assertEqual(score_label(ScoreResult(score=None, model="m", probability=0.724)), "fit 72%")
+
+    def test_a_label_set_by_the_scorer_is_shown_as_given(self):
+        self.assertEqual(score_label(ScoreResult(score=6, model="m", probability=0.4, label="fit 6.1/10")),
+                         "fit 6.1/10")
+
+    def test_neither_score_nor_probability_is_not_available(self):
+        self.assertEqual(score_label(ScoreResult(score=None, model="m")), "n/a")
 
 
 if __name__ == "__main__":

@@ -55,13 +55,28 @@ loads the model, about 5 s).
 
 - `laya.model` is a Hugging Face id such as `convaiinnovations/laya`, downloaded on the first run, or the folder of a
   Laya you fine-tuned on your own job decisions (`~/models/laya_finetuned`).
-- A local folder's `rl_agent_config.json` says how its decisions were trained (`question` or `from_score`) and at
-  which thresholds; jobhunter reads both. For a Hugging Face id the defaults are used (`question`, notify at 7, log
-  at 5).
+- A local folder's `rl_agent_config.json` says how its decisions were trained (`question`, `from_score`, `alert` or
+  `questions`)
+  and at which thresholds; jobhunter reads both. For a Hugging Face id the defaults are used (`question`, notify at
+  7, log at 5).
+- An alert checkpoint is fine-tuned on a single yes/no question (is this job worth an alert?) instead of a 1-10
+  score; it decides alert, save for later or skip itself, from its own `alert_at` / `save_at` cut-offs (see
+  `docs/settings.md`).
+- Alerts, run logs and `compare-db` show an alert checkpoint's result as "fit NN%" rather than a 1-10 score.
+- A questions checkpoint asks three questions instead: the job's stack role and whether it states a dealbreaker (on
+  the posting alone), then, only when the role is one of its `stack_roles` and the dealbreaker chance is below
+  `dealbreaker_at`, how good a fit the job is (1-10). A job that fails a gate is skipped, and the reason names the
+  gate. The fit is summarised as the expected score (`expected`) or the chance of a 7-10 (`p_good`), and compared
+  with the checkpoint's `alert_at` / `save_at`. All five can be overridden in `jobhunter.yaml` (see
+  `docs/settings.md`). Alerts and run logs show its result as "fit 6.42/10" (or "fit NN%" for `p_good`), with the side of the cut-off in words.
+- `check-config` prints the cut-offs an alert or questions checkpoint is using (and a questions checkpoint's gates),
+  and whether they come from the checkpoint or were overridden in `jobhunter.yaml`.
 - If Laya is not installed or its model folder is missing, jobs fall through to the next scorer (`ollama`). The run
   log notes it once per run, and `check-config` says what is missing.
 - A job whose description could not be downloaded (the site refused or timed out) is not scored from its title; it
   is saved as `error_unavailable` and tried again on the next run.
+- Fine-tuning your own alert checkpoint: [training/](training/) holds `laya_train.py` and `train_alert.ipynb`, with
+  dependencies in `requirements-train.txt`, to fine-tune Laya on your own labels.
 
 ## Ollama: choosing a local model
 
@@ -165,6 +180,8 @@ that also has `generate(prompt) -> str` can write cover letters.
 | `list-boards`, `list-scorers` | Built-in and plugin boards and scorers, and where each comes from |
 | `import-db PATH` | Copy jobs from a job-notifier database so none is scored or notified again |
 | `compare-db PATH [--since YYYY-MM-DD]` | For jobs both apps decided: how often they agree, and where they differ |
+| `export-feedback [--out FILE] [--since YYYY-MM-DD]` | Write the verdicts from alert buttons as training labels (`job_id,job_title,company,decision,verdict,received_at`) |
+| `send-test-alert` | Email yourself an alert for the last notified job, to try the feedback buttons |
 
 Each job is saved in `data/jobs.db` with a status: `notified`, `logged` or `skipped` (the score against
 `decisions`), `filtered` (with the filter's reason), `stale` or `gone` (a discovered posting too old, or no longer
@@ -175,6 +192,17 @@ alert), or `error_terminal` (no scorer could read its answer for this job; not r
 
 A job is notified once: the same title at the same company counts as one job whatever board, id or location it comes
 with.
+
+## Feedback
+
+Each alert email has four buttons: ✅ Applied, 👍 Good, 🤷 Maybe and 👎 Bad match. Tapping one opens a pre-filled email to
+your own plus address (`you+jobhunter-feedback@gmail.com`); send it, and the next run reads it over IMAP with the same
+Gmail app password, saves the verdict, and files the message under the label `jobhunter/feedback`. Nothing goes through
+a server and nothing tracks opens. `export-feedback` turns the verdicts into training labels for the next Laya
+fine-tune (docs/settings.md, notify).
+
+To try it: `send-test-alert`, tap a button on your phone and send, `run --only <one board>` (the log shows
+`feedback: 1 saved`), then `export-feedback` shows the row.
 
 ## Moving from job-notifier
 

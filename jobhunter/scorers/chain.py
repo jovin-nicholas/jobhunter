@@ -45,12 +45,14 @@ class ScorerChain:
                 unavailable = True
                 errors.append(f"{name}: {type(e).__name__}: {e}")
                 continue
-            # Every scorer is judged by the same thresholds, whatever its own idea of the decision.
-            result.decision = decide(result.score, self.decisions.notify_at, self.decisions.log_at)
-            least = self.decisions.min_confidence
-            if result.decision == "notify" and least is not None and result.confidence is not None \
-                    and result.confidence < least:
-                result.decision = "log"         # a notify the scorer is unsure of is kept for review, not sent
+            if not result.decision:
+                # Every scored result is judged by the same thresholds, whatever its own idea of the decision.
+                result.decision = decide(result.score, self.decisions.notify_at, self.decisions.log_at)
+                least = self.decisions.min_confidence
+                if result.decision == "notify" and least is not None and result.confidence is not None \
+                        and result.confidence < least:
+                    result.decision = "log"         # a notify the scorer is unsure of is kept for review, not sent
+            # A scorer that decided itself (Laya's alert method, from its checkpoint's cut-offs) is used as given.
             # A scorer that failed before a later one answered is noted once a run, not hidden behind the fallback.
             first = [e for e in errors if e.split(":", 1)[0] not in self._failed]
             self._failed.update(e.split(":", 1)[0] for e in errors)

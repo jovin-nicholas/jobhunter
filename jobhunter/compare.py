@@ -10,6 +10,13 @@ from jobhunter.importer import read_jobs
 DECIDED = ("notified", "logged", "skipped", "filtered")
 
 
+def _shown_score(row: dict):
+    if row.get("match_score") is not None:
+        return row.get("match_score")
+    p = row.get("fit_probability")
+    return f"fit {p:.0%}" if p is not None else None
+
+
 @dataclass
 class Comparison:
     pairs: Counter = field(default_factory=Counter)            # (old status, new status) -> jobs
@@ -35,8 +42,8 @@ def compare(old_db: Path, new_db: Path, since: str | None = None) -> Comparison:
         result.pairs[(before, after)] += 1
         if before != after:
             result.disagreements.append({"id": r["id"], "title": r.get("title"), "company": r.get("company"),
-                                         "old": before, "new": after, "old_score": old[r["id"]].get("match_score"),
-                                         "new_score": r.get("match_score"), "filter_reason": r.get("filter_reason")})
+                                         "old": before, "new": after, "old_score": _shown_score(old[r["id"]]),
+                                         "new_score": _shown_score(r), "filter_reason": r.get("filter_reason")})
     return result
 
 

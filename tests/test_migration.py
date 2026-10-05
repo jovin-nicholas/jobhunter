@@ -94,6 +94,16 @@ class TestCompare(unittest.TestCase):
         self.assertIn("same decision for 50%", report(c))
         self.assertEqual(compare(tmp / "old.db", store.path, since="2999-01-01").total, 0)
 
+    def test_compare_shows_probability_when_there_is_no_score(self):
+        # job-notifier's database has no fit_probability column; jobhunter's row was decided by the alert method
+        tmp = Path(tempfile.mkdtemp())
+        old_db(tmp / "old.db", [("a", "A", "X", "logged", 6)])
+        store = Store(tmp / "new.db")
+        store.save(job("a"), "notified", ScoreResult(score=None, model="laya", decision="notify", probability=0.72))
+        c = compare(tmp / "old.db", store.path)
+        self.assertEqual([(d["old_score"], d["new_score"]) for d in c.disagreements], [(6, "fit 72%")])
+        self.assertIn("(scores 6 / fit 72%)", report(c))
+
 
 class TestMigrationCli(unittest.TestCase):
     def test_import_and_compare_commands(self):

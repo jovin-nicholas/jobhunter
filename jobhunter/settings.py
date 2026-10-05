@@ -11,6 +11,7 @@ import yaml
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from jobhunter.errors import SettingsError
+from jobhunter.feedback import DEFAULT_ALERT_TAG, DEFAULT_FEEDBACK_TAG, TAG_RE
 
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _DAY_NAMES = {**{d: d for d in DAYS}, **{full: full[:3] for full in (
@@ -28,7 +29,9 @@ DEFAULT_GITHUB_READMES = [
     "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md",
     "https://raw.githubusercontent.com/pittcsc/Summer2025-Internships/dev/README.md",
 ]
-_NOTIFY_KEYS = {"slack": {"webhook_env"}, "email": {"from_env", "password_env", "to_env"}}
+_NOTIFY_KEYS = {"slack": {"webhook_env"},
+                "email": {"from_env", "password_env", "to_env", "alert_tag", "feedback_tag"}}
+_NOTIFY_REQUIRED = {"slack": {"webhook_env"}, "email": {"from_env", "password_env"}}
 
 
 @dataclass
@@ -80,6 +83,17 @@ class KeywordFilterSettings:
     exclude_roles: dict[str, RoleGroup] = field(default_factory=dict)
 
 
+EMPLOYMENT_EXCLUDE = ("contract", "hourly")
+EMPLOYMENT_TOGGLE = ("keep", "exclude")
+
+
+@dataclass
+class EmploymentFilterSettings:
+    exclude: list[str]
+    contract_to_hire: str = "keep"
+    hourly_internships: str = "keep"
+
+
 SYSTEMONE_CHECKS = ("citizenship", "clearance")
 
 
@@ -97,6 +111,7 @@ class FilterSettings:
     location: LocationFilterSettings | None = None
     seniority: SeniorityFilterSettings | None = None
     keywords: KeywordFilterSettings | None = None
+    employment: EmploymentFilterSettings | None = None
     systemone: SystemOneSettings | None = None
 
 
@@ -319,7 +334,7 @@ def _boards(c: _Checker, raw: Any) -> list[BoardSettings]:
 
 
 def _filters(c: _Checker, raw: Any) -> FilterSettings:
-    raw = c.mapping("filters", raw, {"location", "seniority", "keywords", "systemone"})
+    raw = c.mapping("filters", raw, {"location", "seniority", "keywords", "employment", "systemone"})
     out = FilterSettings()
     if "location" in raw:
         r = c.mapping("filters.location", raw["location"], {"countries"})
@@ -373,6 +388,24 @@ def _filters(c: _Checker, raw: Any) -> FilterSettings:
             c.strings(f"{key}.exclude_companies", r.get("exclude_companies")),
             groups,
         )
+    if "employment" in raw:
+        key = "filters.employment"
+        r = c.mapping(key, raw["employment"], {"exclude", "contract_to_hire", "hourly_internships"})
+        exclude = c.strings(f"{key}.exclude", r.get("exclude"))
+        for value in exclude:
+            if value not in EMPLOYMENT_EXCLUDE:
+                c.add(f"{key}.exclude", f"unknown value {value!r} (allowed: {', '.join(EMPLOYMENT_EXCLUDE)})")
+        if not exclude:
+            c.add(f"{key}.exclude", f"needs at least one of: {', '.join(EMPLOYMENT_EXCLUDE)}")
+        contract_to_hire = r.get("contract_to_hire", "keep")
+        if contract_to_hire not in EMPLOYMENT_TOGGLE:
+            c.add(f"{key}.contract_to_hire", f"expected keep or exclude, got {contract_to_hire!r}")
+            contract_to_hire = "keep"
+        hourly_internships = r.get("hourly_internships", "keep")
+        if hourly_internships not in EMPLOYMENT_TOGGLE:
+            c.add(f"{key}.hourly_internships", f"expected keep or exclude, got {hourly_internships!r}")
+            hourly_internships = "keep"
+        out.employment = EmploymentFilterSettings(exclude, contract_to_hire, hourly_internships)
     if "systemone" in raw:
         key = "filters.systemone"
         r = c.mapping(key, raw["systemone"], {"model", "url", "timeout_s", "skip_if"})
@@ -440,9 +473,15 @@ def _notify(c: _Checker, raw: Any) -> NotifySettings:
         if raw.get(channel) is None:
             continue
         r = c.mapping(f"notify.{channel}", raw[channel], allowed)
-        missing = allowed - set(r)
+        missing = _NOTIFY_REQUIRED[channel] - set(r)
         if missing:
             c.add(f"notify.{channel}", f"missing {', '.join(sorted(missing))}")
+        if channel == "email":
+            for key in ("alert_tag", "feedback_tag"):
+                if key in r and not TAG_RE.match(str(r[key])):
+                    c.add(f"notify.email.{key}", "use only letters, digits, - and _")
+            if str(r.get("alert_tag", DEFAULT_ALERT_TAG)) == str(r.get("feedback_tag", DEFAULT_FEEDBACK_TAG)):
+                c.add("notify.email", "alert_tag and feedback_tag must differ")
         channels[channel] = {k: str(v) for k, v in r.items()}
     return NotifySettings(channels.get("slack"), channels.get("email"))
 

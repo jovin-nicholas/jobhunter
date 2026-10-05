@@ -1,0 +1,4 @@
+# requirements-train.txt: fine-tuning Laya (training/), on top of requirements-laya.txt
+scikit-learn>=1.5
+pandas>=2.2
+scipy>=1.13

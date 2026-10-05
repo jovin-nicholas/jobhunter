@@ -535,6 +535,36 @@ class TestAlertOncePerJob(unittest.TestCase):
         self.assertTrue(any(line.startswith("DUPLICATE [repeats] Great NodeJS AI  Engineer") for line in logs), logs)
         self.assertEqual(self.statuses(), {})
 
+class FeedbackLine:
+    def line(self):
+        return "feedback: 1 saved (1 good)"
+
+
+class TestFeedbackHook(PipelineTestCase):
+    def test_feedback_is_read_before_searching_and_logged(self):
+        seen = []
+
+        def feedback():
+            seen.append((list(self.logs), dict(self.rows())))   # nothing searched or saved yet
+            return FeedbackLine()
+        _, notifier = self.run_once(feedback=feedback)
+        self.assertEqual(seen, [([], {})])
+        self.assertEqual(self.logs[0], "feedback: 1 saved (1 good)")
+        self.assertTrue(notifier.sent)
+
+    def test_a_failing_feedback_reader_does_not_stop_the_run(self):
+        def boom():
+            raise RuntimeError("imap down")
+        _, notifier = self.run_once(feedback=boom)
+        self.assertEqual(self.logs[0], "feedback: could not read the inbox (RuntimeError)")
+        self.assertTrue(notifier.sent)
+
+    def test_dry_run_never_reads_feedback(self):
+        called = []
+        self.run_once(feedback=lambda: called.append(1), dry_run=True)
+        self.assertEqual(called, [])
+
+
 
 if __name__ == "__main__":
     unittest.main()

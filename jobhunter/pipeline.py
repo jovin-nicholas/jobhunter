@@ -13,7 +13,7 @@ from jobhunter.discovery import Discovery
 from jobhunter.errors import BoardSkipped, SettingsError
 from jobhunter.filters import Filter, build_filters
 from jobhunter.http import Http
-from jobhunter.models import Job, SearchContext
+from jobhunter.models import Job, SearchContext, score_label
 from jobhunter.text_clean import repair_text
 from jobhunter.text_match import word_text
 from jobhunter.page_text import PageUnavailable, fetch_description, needs_page_fetch
@@ -125,7 +125,17 @@ def _construct(key: str, cls: type, options: dict, problems: list[str]) -> Any:
 
 def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dry_run: bool = False,
         http: Http | None = None, log: Log = print,
-        fetch_page: Callable[[str], str] | None = None) -> dict[str, BoardSummary]:
+        fetch_page: Callable[[str], str] | None = None,
+        feedback: Callable[[], Any] | None = None) -> dict[str, BoardSummary]:
+    # Feedback from alert buttons is read first; a dry run never touches the mailbox, and a failure never stops alerts.
+    if feedback is not None and not dry_run:
+        try:
+            got = feedback()
+            line = got.line() if got is not None and callable(getattr(got, "line", None)) else None
+            if line:
+                log(line)
+        except Exception as e:
+            log(f"feedback: could not read the inbox ({type(e).__name__})")
     s = app.settings.search
     http = http or Http()
     ctx = SearchContext(s.queries, s.locations, s.max_age_hours, http, log,
@@ -302,7 +312,7 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
             return
         notified.add(key)
     setattr(counts, status, getattr(counts, status) + 1)
-    log(f"{status.upper()} [{job.source}] {job.title} at {job.company}: {outcome.result.score}/10 "
+    log(f"{status.upper()} [{job.source}] {job.title} at {job.company}: {score_label(outcome.result)} "
         f"({outcome.result.model}, resume {resume.id})")
     if dry_run:
         return
