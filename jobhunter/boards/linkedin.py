@@ -83,8 +83,8 @@ def normalize(raw_jobs: list, max_hours_old: int, log: Callable[[str], None] | N
 
 
 def _job_key(url: str) -> str:
-    """job-notifier's id: the /jobs/view/<slug-number> part (kept as is so imported ids match), without a trailing
-    slash; the currentJobId number for search-page links."""
+    """The job's id: the /jobs/view/<slug-number> part, without a trailing slash; the currentJobId number for
+    search-page links."""
     if "view/" in url:
         return url.split("view/")[1].split("?")[0].split("#")[0].rstrip("/")
     current = parse_qs(urlparse(url).query).get("currentJobId")
@@ -106,7 +106,7 @@ def _listing(raw: Any, max_hours_old: int, cutoff_at: datetime | None = None) ->
             return None
     url = (raw.get("jobUrl") or "").strip()
     if not url:
-        return None      # job-notifier stored these as "linkedin_", merging unrelated jobs into one row
+        return None      # with no URL every such job would get the id "linkedin_", merging unrelated jobs
     return Job(id=f"linkedin_{_job_key(url)}", title=raw.get("position") or "",
                company=clean_company(raw.get("company") or ""), location=raw.get("location") or "",
                url=url, posted_at=raw.get("date") or "", description="", source="linkedin", ats="linkedin")

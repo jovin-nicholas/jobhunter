@@ -1,4 +1,4 @@
-"""Keeps jobs located in the configured countries (ported from job-notifier's corrected US check)."""
+"""Keeps jobs located in the configured countries."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

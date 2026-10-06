@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from jobhunter.text_match import has_term, word_text
 
-# Canonical skill -> aliases (ported from job-notifier's llm_matcher). Order is the order shown to the user.
+# Canonical skill -> aliases. Order is the order shown to the user.
 SKILLS = {
     "python": ["python", "python3"],
     "javascript": ["javascript", "js"],

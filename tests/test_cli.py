@@ -110,7 +110,7 @@ class TestExampleSettings(unittest.TestCase):
         for name in self.ALL_BOARDS:
             self.assertIn(name, out)
 
-    def test_the_job_notifier_example_validates(self):
+    def test_the_full_example_validates(self):
         _, out = self.check(ROOT / "examples" / "full.yaml", ["backend.txt", "fullstack.txt"])
         self.assertIn("13 board(s)", out)
         self.assertIn("vc_boards", out)

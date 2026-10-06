@@ -56,7 +56,7 @@ _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$|^[A-Za-z]+ +\d{1,2}, \d{4}$")
 
 
 def is_fresh(value: Any, cutoff_at: datetime) -> bool:
-    """Jobs without a readable date are kept, as job-notifier did. A date without a time ("2026-09-28",
+    """Jobs without a readable date are kept. A date without a time ("2026-09-28",
     "September 28, 2026") is fresh while its day is inside the window: read as midnight, a job posted late yesterday
     would otherwise look older than it is."""
     dt = parse_time(value)

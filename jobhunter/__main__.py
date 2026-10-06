@@ -1,12 +1,11 @@
-"""Command line: python -m jobhunter [--settings PATH] run | check-config | list-boards | list-scorers | import-db PATH |
-compare-db PATH | export-feedback | send-test-alert"""
+"""Command line: python -m jobhunter [--settings PATH] run | check-config | list-boards | list-scorers |
+export-feedback | send-test-alert"""
 from __future__ import annotations
 
 import argparse
 import csv
 import os
 import re
-import sqlite3
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -15,9 +14,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from jobhunter.compare import compare, report
 from jobhunter.errors import SettingsError
-from jobhunter.importer import import_db
 from jobhunter.inbox import read_feedback
 from jobhunter.notify import Notifier
 from jobhunter.pipeline import bootstrap, run
@@ -188,11 +185,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check-config", help="validate settings, plugins and resumes, then exit")
     sub.add_parser("list-boards", help="built-in and plugin boards")
     sub.add_parser("list-scorers", help="built-in and plugin scorers")
-    imp = sub.add_parser("import-db", help="copy jobs from a job-notifier database so they are not notified again")
-    imp.add_argument("path", help="path to job-notifier's data/jobs.db (opened read-only)")
-    cmp_cmd = sub.add_parser("compare-db", help="compare decisions with a job-notifier database, job by job")
-    cmp_cmd.add_argument("path", help="path to job-notifier's data/jobs.db (opened read-only)")
-    cmp_cmd.add_argument("--since", help="only jobs jobhunter handled on or after this date (YYYY-MM-DD)")
     exp = sub.add_parser("export-feedback", help="write the verdicts given with the alert buttons to a CSV")
     exp.add_argument("--out", help="output file (default: data/feedback_labels.csv next to the settings file)")
     exp.add_argument("--since", help="only verdicts on or after this date (YYYY-MM-DD)")
@@ -211,26 +203,6 @@ def main(argv: list[str] | None = None) -> int:
         table = registry.boards if kind == "board" else registry.scorers
         for name in sorted(table):
             print(f"{name:16} {registry.origins[(kind, name)]}")
-        return 0
-
-    if args.command in ("import-db", "compare-db"):
-        try:
-            settings = load_settings(settings_path)
-        except SettingsError as e:
-            return _print_problems(e.problems)
-        store = Store(settings.data_dir / "jobs.db")
-        try:
-            if args.command == "import-db":
-                s = import_db(Path(args.path), store)
-                counts = ", ".join(f"{k}: {v}" for k, v in sorted(s.copied_by_status.items())) or "none"
-                print(f"copied {s.copied} job(s) ({counts}); {s.already_present} were already in {store.path}"
-                      + (f"; {s.finished_from_old} unfinished there took job-notifier's final status"
-                         if s.finished_from_old else ""))
-            else:
-                print(report(compare(Path(args.path), store.path, args.since)))
-        except (FileNotFoundError, ValueError, sqlite3.DatabaseError) as e:
-            print(f"jobhunter: {e}", file=sys.stderr)
-            return 2
         return 0
 
     if args.command in ("export-feedback", "send-test-alert"):

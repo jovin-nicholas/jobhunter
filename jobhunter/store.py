@@ -1,4 +1,4 @@
-"""SQLite persistence and deduplication. Same `jobs` columns as job-notifier, plus resume_id and filter_reason."""
+"""SQLite persistence and deduplication: one `jobs` row per job, with its status, score and the reason for it."""
 from __future__ import annotations
 
 import json
@@ -75,17 +75,6 @@ class Store:
     def existing_ids(self, ids: list[str]) -> set[str]:
         return set(self._statuses(ids))
 
-    def insert_missing(self, rows: list[dict]) -> int:
-        """Insert rows whose id is not stored yet; stored rows are left as they are. Returns how many were added."""
-        if not rows:
-            return 0
-        columns = [c for c in COLUMNS if c in rows[0]]
-        sql = f"INSERT OR IGNORE INTO jobs ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})"
-        with self._connect() as conn:
-            before = conn.total_changes
-            conn.executemany(sql, [tuple(r.get(c) for c in columns) for r in rows])
-            return conn.total_changes - before
-
     def save(self, job: Job, status: str, result: ScoreResult | None = None, *,
              resume_id: str | None = None, filter_reason: str | None = None) -> None:
         values = {
@@ -132,21 +121,6 @@ class Store:
             first = conn.execute("SELECT first_at FROM empty_answers WHERE job_id = ?", (job_id,)).fetchone()[0]
         if datetime.fromisoformat(first) <= now - timedelta(hours=within_hours):
             self.mark_gone(job_id)
-
-    def adopt_final(self, rows: list[dict]) -> int:
-        """For stored jobs that are not finished, take the given row's status (and details) when that status is
-        final. Returns how many rows changed."""
-        rows = [r for r in rows if (r.get("status") or "") in TERMINAL]
-        if not rows:
-            return 0
-        columns = [c for c in COLUMNS if c in rows[0] and c != "id"]
-        final = ", ".join(f"'{s}'" for s in sorted(TERMINAL))
-        sql = (f"UPDATE jobs SET {', '.join(f'{c} = ?' for c in columns)} "
-               f"WHERE id = ? AND COALESCE(status, '') NOT IN ({final})")
-        with self._connect() as conn:
-            before = conn.total_changes
-            conn.executemany(sql, [tuple(r.get(c) for c in columns) + (r["id"],) for r in rows])
-            return conn.total_changes - before
 
     def add_feedback(self, rows: list[dict]) -> list[dict]:
         """Save feedback verdicts; a message already saved (same message_id) is ignored. Returns the new rows."""

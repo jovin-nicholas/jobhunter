@@ -7,8 +7,8 @@ from typing import Any, Callable
 
 @dataclass
 class Job:
-    id: str                       # unique across boards: usually the board name and its id ("dice_<id>"); some keep
-                                  # job-notifier's ("devto_", "top_amazon_") or name the source ("getro_", "consider_")
+    id: str                       # unique across boards: usually the board name and its id ("dice_<id>"); some name
+                                  # the site ("devto_", "top_amazon_") or the source ("getro_", "consider_")
     title: str
     company: str
     location: str
