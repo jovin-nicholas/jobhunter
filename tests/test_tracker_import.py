@@ -48,6 +48,14 @@ class TestImport(unittest.TestCase):
         self.assertIn("line 3:", report.problems[1])
         self.assertIn("line 4:", report.problems[2])
 
+    def test_a_date_out_of_range_is_reported_by_line(self):
+        path = self.csv("company,title,applied_at\nGlobex,Platform Engineer,0002-10-06\nHooli,SWE,2026-09-03\n")
+        report = import_csv(path, self.apps)
+        self.assertEqual(report.added, 1)
+        self.assertEqual(len(report.problems), 1)
+        self.assertTrue(report.problems[0].startswith("line 2: applied_at"), report.problems)
+        self.assertIn("2000-01-01", report.problems[0])
+
     def test_a_link_in_jobs_db_links_the_job_and_keeps_the_csv_names(self):
         path = self.csv("company,title,url,applied_at\nAcme Inc,Backend Engineer II,"
                         "https://jobs.example.com/acme/1?utm_source=sheet,2026-09-01\n")

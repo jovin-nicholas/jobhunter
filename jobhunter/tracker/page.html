@@ -153,6 +153,8 @@ function el(tag, props = {}, ...kids) {
   }
   return node;
 }
+// A date input saves on blur, and only a whole date from 2000 on: while typing, a field passes through years like 0002.
+function validDate(v) { return /^\d{4}-\d{2}-\d{2}$/.test(v || "") && Number(v.slice(0, 4)) >= 2000; }
 function safeHref(url) { return /^https?:\/\//i.test(url || "") ? url : null; }
 function kids(...nodes) { return nodes.flat().filter(n => n !== null && n !== undefined && n !== false); }
 
@@ -295,7 +297,8 @@ function renderDrawer() {
   const stages = state.stages.map(s => el("button", {type: "button", class: s === a.stage ? "on" : "",
     on: {click: () => setStage(a.id, s)}}, KEY_OF[s] ? el("kbd", {}, KEY_OF[s]) : null, KEY_OF[s] ? " " : null, s));
   const follow = el("input", {type: "date", id: "follow-up", value: a.follow_up_at || "",
-    on: {change: e => e.target.value && act(`/api/applications/${a.id}/follow-up`, {date: e.target.value}, "Follow-up set")}});
+    on: {blur: e => validDate(e.target.value) && e.target.value !== a.follow_up_at
+                    && act(`/api/applications/${a.id}/follow-up`, {date: e.target.value}, "Follow-up set")}});
   drawer.replaceChildren(...kids(
     el("button", {type: "button", class: "close", "aria-label": "Close", on: {click: closeDrawer}}, "×"),
     el("p", {class: "eyebrow"}, [a.board, a.fit, a.resume_id && `resume: ${a.resume_id}`].filter(Boolean).join(" · ")),
@@ -316,7 +319,8 @@ function renderDrawer() {
 }
 function editable(a, field, cls, placeholder, kind = "text") {
   const props = {class: cls, id: `field-${field}`, value: a[field] || "", placeholder, "aria-label": placeholder || field,
-    on: {change: e => save(a.id, field, e.target.value)}};
+    on: {[kind === "date" ? "blur" : "change"]: e => kind === "date" && (!validDate(e.target.value) || e.target.value === a[field])
+                                                     ? null : save(a.id, field, e.target.value)}};
   return kind === "textarea" ? el("textarea", props) : el("input", {...props, type: kind});
 }
 async function save(id, field, value) {
@@ -333,7 +337,11 @@ async function act(path, body, message) {
   try { const r = await api("POST", path, body); await refresh(); if (r.event_ids) toast(message, r.event_ids); }
   catch (e) { toast(`Failed: ${e.message}`); }
 }
-function setStage(id, stage) { const on = document.getElementById("stage-on"), at = on && on.value; return act(`/api/applications/${id}/stage`, at ? {stage, at} : {stage}, `Moved to ${stage}`); }
+function setStage(id, stage) {
+  const on = document.getElementById("stage-on"), at = on && on.value;
+  if (at && !validDate(at)) { toast("Pick a full date from 2000 on, or leave it empty for today"); return; }
+  return act(`/api/applications/${id}/stage`, at ? {stage, at} : {stage}, `Moved to ${stage}`);
+}
 async function review(jobId, action) {
   try {
     const r = await api("POST", "/api/review", {job_id: jobId, action});

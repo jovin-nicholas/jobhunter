@@ -32,7 +32,14 @@ class TestPage(unittest.TestCase):
 
     def test_a_stage_can_be_dated(self):
         self.assertIn('id: "stage-on"', self.text)                     # the drawer's optional "on" date
-        self.assertRegex(self.text, r"function setStage\(id, stage\) \{[^\n]*stage-on")
+        self.assertRegex(self.text, r"function setStage\(id, stage\) \{\s*const on = document.getElementById\(\"stage-on\"\)")
+
+    def test_date_inputs_save_on_blur_and_only_a_full_date_from_2000(self):
+        self.assertIn(r"/^\d{4}-\d{2}-\d{2}$/", self.text)
+        self.assertIn('Number(v.slice(0, 4)) >= 2000', self.text)
+        self.assertNotIn('type: "date", id: "follow-up", value: a.follow_up_at || "",\n    on: {change', self.text)
+        self.assertTrue(re.search(r'id: "follow-up"[^\n]*\n\s*on: \{blur:', self.text), "follow-up saves on blur")
+        self.assertIn('kind === "date" ? "blur" : "change"', self.text)
 
     def test_it_follows_the_colour_scheme_and_reduced_motion(self):
         self.assertIn("prefers-color-scheme: dark", self.text)

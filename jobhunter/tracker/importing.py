@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from jobhunter.tracker import STAGES
-from jobhunter.tracker.records import Applications, iso_date
+from jobhunter.tracker.records import Applications, event_date, iso_date
 
 REQUIRED = ("company", "title", "applied_at")
 
@@ -52,6 +52,11 @@ def import_csv(path: str | Path, apps: Applications, dry_run: bool = False) -> I
                 applied_at = iso_date(value("applied_at"))
             except ValueError:
                 report.problems.append(f"line {line}: applied_at {value('applied_at')!r} is not a date like 2026-10-05")
+                continue
+            try:
+                event_date(applied_at, apps.today())
+            except ValueError as e:
+                report.problems.append(f"line {line}: applied_at {e}")
                 continue
             if stage not in STAGES:
                 report.problems.append(f"line {line}: unknown stage {stage!r} (one of {', '.join(STAGES)})")

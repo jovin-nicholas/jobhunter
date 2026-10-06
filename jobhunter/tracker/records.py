@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from jobhunter.feedback import VERDICTS
@@ -26,6 +26,7 @@ _COLUMNS = ("id", "job_id", "title", "company", "url", "board", "resume_id", "fi
             "stage_at", "follow_up_at", "people", "notes", "created_at")
 _EDITABLE = ("title", "company", "url", "applied_at", "people", "notes")
 _WEB = re.compile(r"^https?://", re.I)
+EARLIEST = date(2000, 1, 1)
 
 
 def now_iso() -> str:
@@ -40,6 +41,34 @@ def iso_date(value: Any) -> str:
         return date.fromisoformat(value.strip()[:10]).isoformat()
     except ValueError:
         raise ValueError(f"not a date like 2026-10-05: {value!r}") from None
+
+
+def _years_from(day: date, years: int) -> date:
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:                                  # 29 February
+        return day.replace(year=day.year + years, day=28)
+
+
+def _within(value: Any, earliest: date, latest: date) -> str:
+    """`value` as YYYY-MM-DD when it falls from `earliest` to `latest`; ValueError otherwise, so a typo like year 0002
+    never reaches the timeline."""
+    day = iso_date(value)
+    if not earliest.isoformat() <= day <= latest.isoformat():
+        raise ValueError(f"{day} is out of range ({earliest.isoformat()} to {latest.isoformat()})")
+    return day
+
+
+def event_date(value: Any, today: date, stage: str | None = None) -> str:
+    """An applied date or a stage date: from 2000 to tomorrow (a time zone ahead). A screen or interview may be
+    scheduled ahead, up to a year (its follow-up, a few days later, stays inside the follow-up range), so it can show
+    as upcoming."""
+    ahead = _years_from(today, 1) if stage in ("screen", "interview") else today + timedelta(days=1)
+    return _within(value, EARLIEST, ahead)
+
+
+def follow_up_date(value: Any, today: date) -> str:
+    return _within(value, _years_from(today, -1), _years_from(today, 2))
 
 
 def safe_url(url: str) -> str:
@@ -73,8 +102,8 @@ def _insert_event(conn: Any, app_id: int, kind: str, value: str | None, at: str)
 
 
 class Applications:
-    def __init__(self, store: Store):
-        self.store = store
+    def __init__(self, store: Store, today: Callable[[], date] = date.today):
+        self.store, self.today = store, today          # `today` bounds the dates; tests pin it
         with store.connect() as conn:
             for sql in _TABLES:
                 conn.execute(sql)
@@ -83,7 +112,7 @@ class Applications:
             board: str = "", resume_id: str = "", fit: str = "", fit_score: float | None = None,
             stage: str = "applied") -> int:
         """A new application with its "applied" event, plus a second stage event when it starts further along."""
-        applied_at = iso_date(applied_at)
+        applied_at = event_date(applied_at, self.today())
         if stage not in STAGES:
             raise ValueError(f"unknown stage {stage!r} (one of {', '.join(STAGES)})")
         with self.store.connect() as conn:
@@ -120,7 +149,7 @@ class Applications:
             raise ValueError(f"not editable: {', '.join(sorted(unknown))}")
         values = {k: str(v if v is not None else "").strip() for k, v in fields.items()}
         if "applied_at" in values:
-            values["applied_at"] = iso_date(values["applied_at"])
+            values["applied_at"] = event_date(values["applied_at"], self.today())
         if "url" in values:
             values["url"] = safe_url(values["url"])
         if not values:
@@ -142,10 +171,10 @@ class Applications:
         if kind == "stage" and value not in STAGES:
             raise ValueError(f"unknown stage {value!r} (one of {', '.join(STAGES)})")
         if kind == "follow_up_set":
-            value = iso_date(value)
+            value = follow_up_date(value, self.today())
         if kind == "follow_up_done":
             value = None
-        at = iso_date(at)
+        at = event_date(at, self.today(), value) if kind == "stage" else iso_date(at)
         with self.store.connect() as conn:
             if conn.execute("SELECT 1 FROM applications WHERE id = ?", (app_id,)).fetchone() is None:
                 raise KeyError(app_id)

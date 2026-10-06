@@ -23,7 +23,7 @@ class ServerTestCase(unittest.TestCase):
         self.store = Store(Path(tempfile.mkdtemp()) / "jobs.db")
         self.store.save(Job("dice_1", "Backend Engineer", "Acme", "Remote", "https://jobs.example.com/acme/1?gh_jid=1",
                             description="Java services", source="dice"), "notified")
-        self.apps = Applications(self.store)
+        self.apps = Applications(self.store, today=lambda: date(2026, 10, 6))
         self.server = TrackerServer(self.apps, self.settings, port=0, http=self.http, today=lambda: date(2026, 10, 6),
                                     token="secret-token")
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -123,6 +123,17 @@ class TestApi(ServerTestCase):
         state = json.loads(self.call("GET", "/api/state")[2])
         self.assertEqual(state["review"], [])
         self.assertEqual(self.call("POST", "/api/review", {"job_id": "dice_1", "action": "maybe"})[0], 400)
+
+    def test_a_date_out_of_range_is_a_400(self):
+        app_id = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
+        for path, body in ((f"/api/applications/{app_id}", {"applied_at": "0002-10-06"}),
+                           (f"/api/applications/{app_id}/follow-up", {"date": "0002-10-06"}),
+                           (f"/api/applications/{app_id}/stage", {"stage": "screen", "at": "0002-10-06"})):
+            with self.subTest(path=path):
+                self.assertEqual(self.call("POST", path, body)[0], 400)
+        app = self.apps.get(app_id)
+        self.assertEqual((app["applied_at"], app["stage"], app["follow_up_at"], len(app["events"])),
+                         ("2026-10-01", "applied", None, 1))
 
     def test_edit_and_description(self):
         app_id = self.apps.add_from_job("dice_1", "2026-10-01")

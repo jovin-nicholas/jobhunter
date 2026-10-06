@@ -2,12 +2,15 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from jobhunter.models import Job, ScoreResult
 from jobhunter.store import Store
 from jobhunter.tracker.records import Applications, iso_date, safe_url, url_key
+
+
+TODAY = date(2026, 10, 6)
 
 
 def new_store():
@@ -34,7 +37,7 @@ class TestTables(unittest.TestCase):
 class TestApplications(unittest.TestCase):
     def setUp(self):
         self.store = new_store()
-        self.apps = Applications(self.store)
+        self.apps = Applications(self.store, today=lambda: TODAY)
 
     def test_add_starts_in_applied_with_one_event(self):
         app_id = self.apps.add(title="Backend Engineer", company="Acme", applied_at="2026-10-01")
@@ -70,6 +73,25 @@ class TestApplications(unittest.TestCase):
             self.apps.update(app_id, stage="offer")
         with self.assertRaises(KeyError):
             self.apps.add_event(999, "stage", "screen", "2026-10-02")
+
+    def test_dates_out_of_range_are_refused(self):
+        app_id = self.apps.add(title="Backend Engineer", company="Acme", applied_at="2026-10-01")
+        far_future = "2029-10-06"
+        for call in (lambda: self.apps.add(title="x", company="y", applied_at="0002-10-06"),
+                     lambda: self.apps.update(app_id, applied_at="0002-10-06"),
+                     lambda: self.apps.add(title="x", company="y", applied_at=far_future),
+                     lambda: self.apps.add_event(app_id, "follow_up_set", "0002-10-06", "2026-10-01"),
+                     lambda: self.apps.add_event(app_id, "follow_up_set", far_future, "2026-10-01"),
+                     lambda: self.apps.add_event(app_id, "stage", "screen", "0002-10-06"),
+                     lambda: self.apps.add_event(app_id, "stage", "rejected", far_future)):
+            with self.subTest(), self.assertRaises(ValueError):
+                call()
+        self.assertEqual(len(self.apps.all()), 1)
+        self.assertEqual(self.apps.get(app_id)["applied_at"], "2026-10-01")
+        self.apps.add_event(app_id, "stage", "rejected", "2026-10-07")          # a day ahead: time zones differ
+        self.apps.add_event(app_id, "stage", "interview", "2026-10-20")         # scheduled ahead
+        with self.assertRaises(ValueError):
+            self.apps.add_event(app_id, "stage", "rejected", "2026-10-08")
 
     def test_update_edits_fields_and_moves_the_first_applied_event(self):
         app_id = self.apps.add(title="", company="", applied_at="2026-10-01")
