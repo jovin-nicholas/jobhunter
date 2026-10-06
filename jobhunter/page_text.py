@@ -20,6 +20,9 @@ from jobhunter.text_match import has_term, word_text
 
 MAX_CHARS = 8000
 MIN_USEFUL_CHARS = 200
+# Sites known to refuse automated reads of their posting pages (e.g. Indeed answers 401 to every request): no fetch
+# is attempted for these, and a board that needs a description for such a URL filters the job instead of retrying it.
+UNREADABLE_HOSTS = {"indeed.com"}
 BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/120.0.0.0 Safari/537.36")
 # Job boards and ATS sites: redirects are followed and larger pages allowed.
@@ -106,6 +109,12 @@ def best_description(markup: str) -> str:
 
 def needs_page_fetch(description: str | None, is_snippet: bool | None) -> bool:
     return is_snippet is True or len((description or "").strip()) < MIN_USEFUL_CHARS
+
+
+def unreadable_host(url: str) -> str | None:
+    """The UNREADABLE_HOSTS entry that `url`'s host matches (itself or a subdomain), or None."""
+    host = (urlparse(url or "").hostname or "").lower().strip(".")
+    return next((blocked for blocked in UNREADABLE_HOSTS if host == blocked or host.endswith("." + blocked)), None)
 
 
 _CHARSET = re.compile(r"charset=\s*[\"']?([\w.-]+)", re.I)

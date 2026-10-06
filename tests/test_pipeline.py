@@ -368,6 +368,103 @@ class TestNoDescriptionNoScore(unittest.TestCase):
         self.assertTrue(VcBoardsBoard.needs_description)
 
 
+NEEDS_TEXT_INDEED = """
+from jobhunter import Job, board
+
+
+@board("needs_text_indeed")
+class NeedsTextIndeed:
+    needs_description = True          # like vc_boards: the listing has no description of its own
+
+    def __init__(self, options):
+        pass
+
+    def search(self, ctx):
+        yield Job("n_indeed", "Great Engineer", "Acme", "Remote - US", "https://www.indeed.com/viewjob?jk=abc")
+        yield Job("n_other", "Great Engineer", "Acme", "Remote - US", "https://example.com/full")
+"""
+
+
+class TestUnreadableHostIsFiltered(unittest.TestCase):
+    def test_a_job_on_a_host_that_refuses_automated_reading_is_filtered_with_no_fetch_attempted(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = ("resumes: {folder: resumes, default: backend.txt}\n"
+                    "search: {queries: [swe], locations: [Remote]}\n"
+                    "boards: {needs_text_indeed: {}}\nscorers: [fixed]\ndiscovery: {github_readmes: []}\n")
+        path = write_project(tmp, settings, plugins={"needs_text_indeed.py": NEEDS_TEXT_INDEED,
+                                                       "scorers.py": SCORERS})
+        fetched = []
+
+        def fetch(url):
+            fetched.append(url)
+            return "Build our platform in Python. " * 20
+
+        store = Store(tmp / "data" / "jobs.db")
+        summary = run(bootstrap(path, env={}), store, FakeNotifier(), log=lambda line: None, fetch_page=fetch)
+        with closing(sqlite3.connect(store.path)) as conn:
+            statuses = dict(conn.execute("SELECT id, status FROM jobs"))
+            reason = conn.execute("SELECT filter_reason FROM jobs WHERE id = 'n_indeed'").fetchone()[0]
+        self.assertEqual(statuses, {"n_indeed": "filtered", "n_other": "notified"})
+        self.assertEqual(reason, "no description: indeed.com does not allow automated reading")
+        self.assertNotIn("https://www.indeed.com/viewjob?jk=abc", fetched)   # a blocked host is never fetched
+        self.assertEqual(summary["needs_text_indeed"].filtered["description"], 1)
+
+
+NEEDS_TEXT_ONE = """
+from jobhunter import Job, board
+
+
+@board("needs_text_one")
+class NeedsTextOne:
+    needs_description = True          # like vc_boards: the listing has no description of its own
+
+    def __init__(self, options):
+        pass
+
+    def search(self, ctx):
+        yield Job("n_one", "Great Engineer", "Acme", "Remote - US", "https://example.com/one")
+"""
+
+
+class TestNoDescriptionGivesUpAfterHours(unittest.TestCase):
+    def test_a_job_with_no_description_is_retried_then_filtered_after_6_hours(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = ("resumes: {folder: resumes, default: backend.txt}\n"
+                    "search: {queries: [swe], locations: [Remote]}\n"
+                    "boards: {needs_text_one: {}}\nscorers: [fixed]\ndiscovery: {github_readmes: []}\n")
+        path = write_project(tmp, settings, plugins={"needs_text_one.py": NEEDS_TEXT_ONE, "scorers.py": SCORERS})
+        store = Store(tmp / "data" / "jobs.db")
+        app = bootstrap(path, env={})
+
+        run(app, store, FakeNotifier(), log=lambda line: None, fetch_page=lambda url: "")
+        with closing(sqlite3.connect(store.path)) as conn:
+            self.assertEqual(conn.execute("SELECT status FROM jobs WHERE id = 'n_one'").fetchone()[0],
+                              "error_unavailable")
+
+        # Still inside its first NO_DESCRIPTION_HOURS: the first-run (retry) behaviour is unchanged.
+        run(app, store, FakeNotifier(), log=lambda line: None, fetch_page=lambda url: "")
+        with closing(sqlite3.connect(store.path)) as conn:
+            self.assertEqual(conn.execute("SELECT status FROM jobs WHERE id = 'n_one'").fetchone()[0],
+                              "error_unavailable")
+
+        seven_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+        with closing(sqlite3.connect(store.path)) as conn, conn:
+            conn.execute("UPDATE jobs SET first_run_at = ? WHERE id = 'n_one'", (seven_hours_ago,))
+
+        summary = run(app, store, FakeNotifier(), log=lambda line: None, fetch_page=lambda url: "")
+        with closing(sqlite3.connect(store.path)) as conn:
+            status, reason = conn.execute(
+                "SELECT status, filter_reason FROM jobs WHERE id = 'n_one'").fetchone()
+        self.assertEqual(status, "filtered")
+        self.assertEqual(reason, "no description: the posting page gave no text after several tries")
+        self.assertEqual(summary["needs_text_one"].filtered["description"], 1)
+
+        # Final: a board listing it again does not revive it, since `filtered` is terminal.
+        run(app, store, FakeNotifier(), log=lambda line: None, fetch_page=lambda url: "")
+        with closing(sqlite3.connect(store.path)) as conn:
+            self.assertEqual(conn.execute("SELECT status FROM jobs WHERE id = 'n_one'").fetchone()[0], "filtered")
+
+
 SKIPPING = """
 from jobhunter import board
 from jobhunter.errors import BoardSkipped

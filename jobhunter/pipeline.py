@@ -17,7 +17,7 @@ from jobhunter.http import Http
 from jobhunter.models import Job, SearchContext, score_label
 from jobhunter.text_clean import repair_text
 from jobhunter.text_match import word_text
-from jobhunter.page_text import PageUnavailable, fetch_description, needs_page_fetch
+from jobhunter.page_text import PageUnavailable, fetch_description, needs_page_fetch, unreadable_host
 from jobhunter.registry import Registry, build_registry, check_names
 from jobhunter.resumes import ResumeSet, load_resumes
 from jobhunter.scorers.chain import ScorerChain
@@ -27,6 +27,9 @@ from jobhunter.store import RETRY_HOURS, STATUS_FOR_DECISION
 Log = Callable[[str], None]
 _REPAIRED = {"title", "company", "location", "description"}
 REPEAT_DAYS = 30        # a job notified this recently is not notified again
+# A board that needs a description (needs_description) gives up and files the job as filtered once it has been
+# retried for this many hours with no text, rather than retrying it for the full RETRY_HOURS.
+NO_DESCRIPTION_HOURS = 6
 
 
 def same_job_key(title: str, company: str) -> tuple[str, str]:
@@ -280,7 +283,12 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
     # A job whose description source refused us is retried next run rather than scored from its title: Laya learned
     # to answer "log" for jobs without a description.
     refused = bool(job.extra.get("description_refused"))
-    if fetch_page and not refused and needs_page_fetch(job.description, job.description_is_snippet):
+    # A board whose listings carry no description of their own (vc_boards) needs the posting page fetched; a host
+    # that never allows automated reading (e.g. Indeed answers 401) is never worth trying, so no fetch is attempted.
+    needs_desc = getattr(board, "needs_description", False)
+    blocked_host = unreadable_host(job.url) if needs_desc else None
+    if blocked_host is None and fetch_page and not refused and needs_page_fetch(job.description,
+                                                                                 job.description_is_snippet):
         try:
             text = fetch_page(job.url)
         except PageUnavailable as e:
@@ -300,6 +308,13 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
 
     # After the filters: a job they drop needs no description, and one that passes is filtered again next run
     # once its description has loaded.
+    if blocked_host is not None and needs_page_fetch(job.description, job.description_is_snippet):
+        reason = f"no description: {blocked_host} does not allow automated reading"
+        counts.filtered["description"] += 1
+        log(f"FILTERED [{job.source}] {job.title} at {job.company}: {reason}")
+        if not dry_run:
+            store.save(job, "filtered", filter_reason=reason)
+        return
     if refused and needs_page_fetch(job.description, job.description_is_snippet):
         counts.retry += 1
         log(f"RETRY_LATER [{job.source}] {job.title} at {job.company}: description unavailable, not scored")
@@ -307,8 +322,17 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
             store.save(job, "error_unavailable")
         return
     # A board whose listings carry no description of their own (vc_boards) has nothing but a title when the posting
-    # page gave no text, so the job is tried again next run like a refused one.
-    if getattr(board, "needs_description", False) and needs_page_fetch(job.description, job.description_is_snippet):
+    # page gave no text, so the job is tried again next run like a refused one, for up to NO_DESCRIPTION_HOURS; a
+    # page still giving no text after that many hours of tries is given up on rather than retried indefinitely.
+    if needs_desc and needs_page_fetch(job.description, job.description_is_snippet):
+        first = store.first_saved_at(job.id)
+        if first is not None and datetime.now(timezone.utc) - first >= timedelta(hours=NO_DESCRIPTION_HOURS):
+            reason = "no description: the posting page gave no text after several tries"
+            counts.filtered["description"] += 1
+            log(f"FILTERED [{job.source}] {job.title} at {job.company}: {reason}")
+            if not dry_run:
+                store.save(job, "filtered", filter_reason=reason)
+            return
         counts.retry += 1
         counts.no_description += 1
         log(f"RETRY_LATER [{job.source}] {job.title} at {job.company}: no description on the posting page, "

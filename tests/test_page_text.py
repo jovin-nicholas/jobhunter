@@ -2,7 +2,8 @@ import unittest
 
 import requests
 
-from jobhunter.page_text import PageUnavailable, best_description, classify, fetch_description, needs_page_fetch
+from jobhunter.page_text import (PageUnavailable, best_description, classify, fetch_description, needs_page_fetch,
+                                  unreadable_host)
 
 PUBLIC = lambda host: ["93.184.216.34"]
 PRIVATE = lambda host: ["10.0.0.5"]
@@ -191,6 +192,18 @@ class TestForbidden(unittest.TestCase):
                               lambda line: None, resolve=PUBLIC)
         self.assertEqual(fetch_description(FakeHttp(FakePage(b"", status_code=403)), "https://careers.example.org/1",
                                            lambda line: None, resolve=PUBLIC), "")
+
+
+class TestUnreadableHost(unittest.TestCase):
+    def test_indeed_and_its_subdomains_are_unreadable(self):
+        self.assertEqual(unreadable_host("https://www.indeed.com/viewjob?jk=abc"), "indeed.com")
+        self.assertEqual(unreadable_host("https://indeed.com/viewjob?jk=abc"), "indeed.com")
+        self.assertEqual(unreadable_host("https://de.indeed.com/viewjob?jk=abc"), "indeed.com")
+
+    def test_other_hosts_and_lookalikes_are_not_matched(self):
+        self.assertIsNone(unreadable_host("https://www.linkedin.com/jobs/view/1"))
+        self.assertIsNone(unreadable_host("https://notindeed.com/viewjob?jk=abc"))
+        self.assertIsNone(unreadable_host(""))
 
 
 if __name__ == "__main__":
