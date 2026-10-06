@@ -228,5 +228,20 @@ class TestLinkedInContract(unittest.TestCase):
             LinkedInBoard({"under_10_applicants": True})
 
 
+class TestProcessFolderCleanup(unittest.TestCase):
+    def test_the_process_folder_is_removed_when_the_process_exits(self):
+        from unittest.mock import patch
+        from jobhunter.boards import linkedin
+        with patch.object(linkedin, "_process_dir", None), patch("jobhunter.boards.linkedin.atexit.register") as reg:
+            folder = linkedin.private_dir(None)
+            self.addCleanup(shutil.rmtree, folder, True)
+            self.assertEqual([c.args for c in reg.call_args_list], [(linkedin._remove_process_dir,)])
+            linkedin._remove_process_dir()
+            self.assertFalse(folder.exists())
+            again = linkedin.private_dir(None)                  # a later call in the same process makes a new one
+            self.addCleanup(shutil.rmtree, again, True)
+            self.assertTrue(again.is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()

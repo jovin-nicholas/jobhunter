@@ -8,6 +8,7 @@ page was mostly refused with HTTP 429.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import random
 import re
@@ -148,11 +149,21 @@ def private_dir(data_dir: Path | None) -> Path:
         with _process_dir_lock:
             if _process_dir is None or not _process_dir.is_dir():
                 _process_dir = Path(tempfile.mkdtemp(prefix="jobhunter-npx-"))      # created 0700
+                atexit.register(_remove_process_dir)
             return _process_dir
     folder = Path(data_dir) / "npx"
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     folder.chmod(0o700)                                             # mkdir's mode is masked by umask
     return folder
+
+
+def _remove_process_dir() -> None:
+    """At exit: private_dir(None)'s temp folder goes, so each process leaves none behind."""
+    global _process_dir
+    with _process_dir_lock:
+        if _process_dir is not None:
+            shutil.rmtree(_process_dir, ignore_errors=True)
+            _process_dir = None
 
 
 def server_params(npx_option: str | None, cwd: Path | None = None):
