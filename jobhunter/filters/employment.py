@@ -3,7 +3,8 @@ wording that signals one: a title word like "contract" or "temp", an hourly rate
 phrase such as "6-month contract", or an explicit "employment type: contract" label. A skip is final, so each rule
 asks for wording that names the arrangement: a bare "1099" (as in "Form 1099 processing"), a product that handles
 contractors ("independent contractor onboarding", "help freelancers work as a contractor"), a number per hour without
-a currency in the description ("10,000/hr transactions") or "smart contract" never skips. In the title a number per hour is pay ("Data Engineer 65/hr W2")."""
+a currency in the description ("10,000/hr transactions"), more than $500 an hour ("$10,000/hr of transactions") or
+"smart contract" never skips. In the title a number per hour is pay ("Data Engineer 65/hr W2")."""
 from __future__ import annotations
 
 import re
@@ -90,6 +91,19 @@ _HOURLY_RE = re.compile(
     rf"|{_MONEY}\s+hourly\b",
     re.I)
 
+# More than this per hour is throughput or spend ("processes $10,000/hr of transactions"), not a pay rate.
+MAX_HOURLY_PAY = 500
+
+
+def _pay_rate(matches) -> re.Match | None:
+    """The first match whose amount (its first number) could be an hourly wage."""
+    for m in matches:
+        amount = float(re.search(_NUM, m.group(0)).group(0).replace(",", ""))
+        if amount <= MAX_HOURLY_PAY:
+            return m
+    return None
+
+
 _INTERN_TITLE_TERMS = ("intern", "internship", "co-op", "coop")
 
 
@@ -133,7 +147,7 @@ class EmploymentFilter:
         if "hourly" in self.s.exclude:
             if self.s.hourly_internships == "keep" and any(has_term(title, t) for t in _INTERN_TITLE_TERMS):
                 return KEEP
-            m = _TITLE_HOURLY_RE.search(job.title or "") or _HOURLY_RE.search(raw_text)
+            m = _pay_rate(_TITLE_HOURLY_RE.finditer(job.title or "")) or _pay_rate(_HOURLY_RE.finditer(raw_text))
             if m:
                 return skip(f"hourly pay: {m.group(0).strip().lower()}")
         return KEEP

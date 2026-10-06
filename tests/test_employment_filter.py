@@ -315,5 +315,21 @@ class TestContractWordsAboutTheProduct(unittest.TestCase):
                 self.assertEqual(result.reason, f"contract: {snippet}")
 
 
+class TestHourlyAmountsThatAreNotPay(unittest.TestCase):
+
+    def test_large_amounts_per_hour_are_throughput(self):
+        for description in ("Our system processes $10,000/hr of transactions.",
+                            "We settle 10,000 USD per hour in payments.",
+                            "Ads spend of $2,500 per hour at peak."):
+            with self.subTest(description=description):
+                self.assertTrue(f().check(job(description=description)).keep, description)
+
+    def test_pay_rates_still_skip(self):
+        for description, snippet in {"Pay: $55/hr": "$55/hr", "Rate: $150/hr for senior consultants": "$150/hr",
+                                     "USD 300 per hour": "usd 300 per hour"}.items():
+            with self.subTest(description=description):
+                self.assertEqual(f().check(job(description=description)).reason, f"hourly pay: {snippet}")
+
+
 if __name__ == "__main__":
     unittest.main()
