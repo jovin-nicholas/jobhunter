@@ -58,6 +58,10 @@ class Store:
         finally:
             conn.close()
 
+    def connect(self):
+        """A connection for the other tables in jobs.db (the tracker's), with the same WAL mode and busy timeout."""
+        return self._connect()
+
     def _statuses(self, ids: list[str]) -> dict[str, str]:
         status: dict[str, str] = {}
         with self._connect() as conn:

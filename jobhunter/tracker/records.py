@@ -1,0 +1,217 @@
+"""Applications and their events, in jobs.db next to the jobs they came from. Every write goes through Store's
+connection (WAL, 30 s busy timeout), so a scheduled run writing at the same moment waits instead of failing."""
+from __future__ import annotations
+
+import re
+from datetime import date, datetime, timezone
+from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+from jobhunter.store import Store
+from jobhunter.tracker import EVENT_KINDS, OPEN_STAGES, STAGES
+
+_TABLES = (
+    "CREATE TABLE IF NOT EXISTS applications (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, "
+    "title TEXT NOT NULL, company TEXT NOT NULL, url TEXT, board TEXT, resume_id TEXT, fit TEXT, fit_score REAL, "
+    "applied_at TEXT NOT NULL, stage TEXT NOT NULL, stage_at TEXT NOT NULL, follow_up_at TEXT, people TEXT, "
+    "notes TEXT, created_at TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS application_events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+    "application_id INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT, at TEXT NOT NULL, created_at TEXT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS application_events_by_app ON application_events (application_id)",
+    "CREATE TABLE IF NOT EXISTS review_hidden (job_id TEXT PRIMARY KEY, hidden_at TEXT NOT NULL)",
+)
+_COLUMNS = ("id", "job_id", "title", "company", "url", "board", "resume_id", "fit", "fit_score", "applied_at", "stage",
+            "stage_at", "follow_up_at", "people", "notes", "created_at")
+_EDITABLE = ("title", "company", "url", "applied_at", "people", "notes")
+_WEB = re.compile(r"^https?://", re.I)
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def iso_date(value: Any) -> str:
+    """`value` as YYYY-MM-DD (a longer ISO time keeps its date); ValueError for anything else."""
+    if not isinstance(value, str):
+        raise ValueError(f"not a date like 2026-10-05: {value!r}")
+    try:
+        return date.fromisoformat(value.strip()[:10]).isoformat()
+    except ValueError:
+        raise ValueError(f"not a date like 2026-10-05: {value!r}") from None
+
+
+def safe_url(url: str) -> str:
+    """The link when it is http(s), else "": a javascript: or data: link must never reach the page."""
+    url = (url or "").strip()
+    return url if _WEB.match(url) else ""
+
+
+def url_key(url: str) -> str:
+    """How pasted links are matched: lower-case scheme and host, no query, fragment or trailing slash."""
+    parts = urlsplit((url or "").strip())
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
+
+
+def _refresh(conn: Any, app_id: int) -> None:
+    """Rewrite the cached stage and follow-up from the events, so they always match the timeline."""
+    applied_at = conn.execute("SELECT applied_at FROM applications WHERE id = ?", (app_id,)).fetchone()[0]
+    stage = conn.execute("SELECT value, at FROM application_events WHERE application_id = ? AND kind = 'stage' "
+                         "ORDER BY at DESC, id DESC LIMIT 1", (app_id,)).fetchone() or ("applied", applied_at)
+    follow = conn.execute("SELECT kind, value FROM application_events WHERE application_id = ? AND kind IN "
+                          "('follow_up_set', 'follow_up_done') ORDER BY id DESC LIMIT 1", (app_id,)).fetchone()
+    follow_up = follow[1] if follow and follow[0] == "follow_up_set" else None
+    conn.execute("UPDATE applications SET stage = ?, stage_at = ?, follow_up_at = ? WHERE id = ?",
+                 (stage[0], stage[1], follow_up, app_id))
+
+
+def _insert_event(conn: Any, app_id: int, kind: str, value: str | None, at: str) -> int:
+    return conn.execute("INSERT INTO application_events (application_id, kind, value, at, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)", (app_id, kind, value, at, now_iso())).lastrowid
+
+
+class Applications:
+    def __init__(self, store: Store):
+        self.store = store
+        with store.connect() as conn:
+            for sql in _TABLES:
+                conn.execute(sql)
+
+    def add(self, *, title: str, company: str, applied_at: str, url: str = "", job_id: str | None = None,
+            board: str = "", resume_id: str = "", fit: str = "", fit_score: float | None = None,
+            stage: str = "applied") -> int:
+        """A new application with its "applied" event, plus a second stage event when it starts further along."""
+        applied_at = iso_date(applied_at)
+        if stage not in STAGES:
+            raise ValueError(f"unknown stage {stage!r} (one of {', '.join(STAGES)})")
+        with self.store.connect() as conn:
+            app_id = conn.execute(
+                "INSERT INTO applications (job_id, title, company, url, board, resume_id, fit, fit_score, applied_at, "
+                "stage, stage_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?, ?)",
+                (job_id, title.strip(), company.strip(), safe_url(url), board, resume_id, fit, fit_score, applied_at,
+                 applied_at, now_iso())).lastrowid
+            _insert_event(conn, app_id, "stage", "applied", applied_at)
+            if stage != "applied":
+                _insert_event(conn, app_id, "stage", stage, applied_at)
+            _refresh(conn, app_id)
+        return app_id
+
+    def job_fields(self, job_id: str) -> dict | None:
+        """What an application copies from a stored job; None when the job is not in jobs.db."""
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT title, company, url, source, resume_id, score_label, match_score FROM jobs "
+                               "WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        title, company, url, board, resume_id, label, score = row
+        return {"job_id": job_id, "title": title or "", "company": company or "", "url": url or "",
+                "board": board or "", "resume_id": resume_id or "",
+                "fit": label or (f"{score}/10" if score is not None else ""), "fit_score": score}
+
+    def add_from_job(self, job_id: str, applied_at: str) -> int | None:
+        fields = self.job_fields(job_id)
+        return None if fields is None else self.add(**fields, applied_at=applied_at)
+
+    def update(self, app_id: int, **fields: Any) -> None:
+        unknown = set(fields) - set(_EDITABLE)
+        if unknown:
+            raise ValueError(f"not editable: {', '.join(sorted(unknown))}")
+        values = {k: str(v if v is not None else "").strip() for k, v in fields.items()}
+        if "applied_at" in values:
+            values["applied_at"] = iso_date(values["applied_at"])
+        if "url" in values:
+            values["url"] = safe_url(values["url"])
+        if not values:
+            return
+        with self.store.connect() as conn:
+            if conn.execute("SELECT 1 FROM applications WHERE id = ?", (app_id,)).fetchone() is None:
+                raise KeyError(app_id)
+            conn.execute(f"UPDATE applications SET {', '.join(f'{k} = ?' for k in values)} WHERE id = ?",
+                         (*values.values(), app_id))
+            if "applied_at" in values:      # the timeline's first event is the application itself
+                conn.execute("UPDATE application_events SET at = ? WHERE id = (SELECT MIN(id) FROM application_events "
+                             "WHERE application_id = ? AND kind = 'stage' AND value = 'applied')",
+                             (values["applied_at"], app_id))
+            _refresh(conn, app_id)
+
+    def add_event(self, app_id: int, kind: str, value: str | None, at: str) -> int:
+        if kind not in EVENT_KINDS:
+            raise ValueError(f"unknown event {kind!r} (one of {', '.join(EVENT_KINDS)})")
+        if kind == "stage" and value not in STAGES:
+            raise ValueError(f"unknown stage {value!r} (one of {', '.join(STAGES)})")
+        if kind == "follow_up_set":
+            value = iso_date(value)
+        if kind == "follow_up_done":
+            value = None
+        at = iso_date(at)
+        with self.store.connect() as conn:
+            if conn.execute("SELECT 1 FROM applications WHERE id = ?", (app_id,)).fetchone() is None:
+                raise KeyError(app_id)
+            event_id = _insert_event(conn, app_id, kind, value, at)
+            _refresh(conn, app_id)
+        return event_id
+
+    def delete_events(self, event_ids: list[int]) -> None:
+        """Undo: the events go, and each application's cached stage and follow-up follow the remaining ones."""
+        with self.store.connect() as conn:
+            for event_id in event_ids:
+                row = conn.execute("SELECT application_id FROM application_events WHERE id = ?", (event_id,)).fetchone()
+                if row:
+                    conn.execute("DELETE FROM application_events WHERE id = ?", (event_id,))
+                    _refresh(conn, row[0])
+
+    def _rows(self, where: str = "", params: tuple = ()) -> list[dict]:
+        with self.store.connect() as conn:
+            apps = [dict(zip(_COLUMNS, r)) for r in conn.execute(
+                f"SELECT {', '.join(_COLUMNS)} FROM applications {where} ORDER BY id", params)]
+            ids = [a["id"] for a in apps]
+            events: dict[int, list[dict]] = {i: [] for i in ids}
+            if ids:
+                for r in conn.execute(f"SELECT id, application_id, kind, value, at, created_at FROM application_events "
+                                      f"WHERE application_id IN ({','.join('?' * len(ids))}) ORDER BY at, id", ids):
+                    events[r[1]].append({"id": r[0], "kind": r[2], "value": r[3], "at": r[4], "created_at": r[5]})
+        for a in apps:
+            a["events"] = events[a["id"]]
+        return apps
+
+    def get(self, app_id: int) -> dict | None:
+        rows = self._rows("WHERE id = ?", (app_id,))
+        return rows[0] if rows else None
+
+    def all(self) -> list[dict]:
+        return self._rows()
+
+    def open_for_job(self, job_id: str) -> int | None:
+        with self.store.connect() as conn:
+            row = conn.execute(f"SELECT id FROM applications WHERE job_id = ? AND stage IN "
+                               f"({','.join('?' * len(OPEN_STAGES))}) ORDER BY id DESC LIMIT 1",
+                               (job_id, *OPEN_STAGES)).fetchone()
+        return row[0] if row else None
+
+    def find_job(self, url: str) -> str | None:
+        """The stored job a pasted link points at: the same URL, else the same one without tracking noise."""
+        url, key = (url or "").strip(), url_key(url)
+        if not key:
+            return None
+        pattern = key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT id FROM jobs WHERE url = ? LIMIT 1", (url,)).fetchone()
+            if row:
+                return row[0]
+            for job_id, candidate in conn.execute("SELECT id, url FROM jobs WHERE url LIKE ? ESCAPE '\\'",
+                                                  (pattern,)):
+                if url_key(candidate) == key:
+                    return job_id
+        return None
+
+    def exists(self, company: str, title: str, applied_at: str) -> bool:
+        with self.store.connect() as conn:
+            return conn.execute("SELECT 1 FROM applications WHERE lower(company) = ? AND lower(title) = ? AND "
+                                "applied_at = ? LIMIT 1",
+                                (company.strip().lower(), title.strip().lower(), applied_at)).fetchone() is not None
+
+    def description(self, app_id: int) -> str:
+        """The stored job description, for preparing an interview after the posting is taken down."""
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT j.jd_text FROM applications a JOIN jobs j ON j.id = a.job_id WHERE a.id = ?",
+                               (app_id,)).fetchone()
+        return (row[0] or "") if row else ""
