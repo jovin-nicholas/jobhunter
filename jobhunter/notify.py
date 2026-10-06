@@ -37,19 +37,39 @@ def _for_reader(reasoning: str) -> str:
     return _CUTOFFS.sub("", reasoning or "")
 
 
+def _is_web(url) -> bool:
+    return str(url or "").lower().startswith(("https://", "http://"))
+
+
+def slack_escape(text) -> str:
+    """Slack's three control characters, so a posting cannot @channel, mention people or add links of its own."""
+    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _slack_link(url) -> str:
+    """A web link in Slack's own <url|label> form, with | and > percent-encoded so they cannot end it early; any
+    other URL is shown as escaped text."""
+    if not _is_web(url):
+        return slack_escape(url)
+    return f"<{slack_escape(str(url).replace('|', '%7C').replace('>', '%3E')).replace('&lt;', '%3C')}|Open job>"
+
+
 def _summary(job: Job, result: ScoreResult, resume_id: str, for_email: bool = False) -> str:
-    """The alert text. Slack keeps the model and the cut-offs; the email leaves both out."""
-    model = "" if for_email else f" ({result.model})"
-    why = _for_reader(result.reasoning) if for_email else result.reasoning
-    return (f"{job.title} at {job.company}\n"
-            f"Location: {job.location}\n"
-            f"Link: {job.url}\n\n"
-            f"Score: {score_label(result)}{model}\n"
-            f"Resume: {resume_id}\n"
+    """The alert text. Slack keeps the model and the cut-offs, with every field escaped for Slack; the email leaves
+    both out."""
+    e = (lambda s: str(s)) if for_email else slack_escape
+    model = "" if for_email else f" ({e(result.model)})"
+    why = _for_reader(result.reasoning) if for_email else e(result.reasoning)
+    link = job.url if for_email else _slack_link(job.url)
+    return (f"{e(job.title)} at {e(job.company)}\n"
+            f"Location: {e(job.location)}\n"
+            f"Link: {link}\n\n"
+            f"Score: {e(score_label(result))}{model}\n"
+            f"Resume: {e(resume_id)}\n"
             f"Why: {why}\n"
-            f"Matched skills: {', '.join(result.matched_skills) or 'none'}\n"
-            f"Gaps: {', '.join(result.keyword_gaps) or 'none'}\n"
-            f"Source: {job.source} | Posted: {job.posted_at or 'unknown'}")
+            f"Matched skills: {e(', '.join(result.matched_skills) or 'none')}\n"
+            f"Gaps: {e(', '.join(result.keyword_gaps) or 'none')}\n"
+            f"Source: {e(job.source)} | Posted: {e(job.posted_at or 'unknown')}")
 
 
 def email_addresses(cfg: dict, env: Mapping[str, str]) -> tuple[str, str, str]:
@@ -74,7 +94,7 @@ def _html(job: Job, result: ScoreResult, resume_id: str, links: list[tuple[str, 
                                      f"posted {job.posted_at}" if job.posted_at else "") if x)
     # Only a web link gets a button: a scraped javascript: or data: URL would be live in some mail apps.
     open_job = (f'<p><a href="{e(job.url)}" style="{_BTN};background:#1a73e8;color:#ffffff">Open job ↗</a></p>'
-                if str(job.url or "").lower().startswith(("https://", "http://")) else "")
+                if _is_web(job.url) else "")
     buttons = "".join(f'<a href="{e(href)}" style="{_BTN}">{e(label)}</a>' for label, href in links)
     letter = (f'<h3 style="font-size:15px;margin:20px 0 6px">Cover letter draft</h3>'
               f'<div style="white-space:pre-wrap">{e(cover_letter)}</div>') if cover_letter else ""
@@ -105,7 +125,7 @@ class Notifier:
         """True when at least one channel delivered the alert, or none is set up."""
         body = _summary(job, result, resume_id)
         if cover_letter:
-            body += f"\n\nCover letter draft:\n{cover_letter}"
+            body += f"\n\nCover letter draft:\n{slack_escape(cover_letter)}"
         delivered = []
         if self.settings.slack:
             delivered.append(self._slack(job, result, body))
@@ -116,7 +136,7 @@ class Notifier:
     def _slack(self, job: Job, result: ScoreResult, body: str) -> bool:
         url = self.env.get(self.settings.slack["webhook_env"], "")
         try:
-            requests.post(url, json={"text": f":dart: *New match, {score_label(result)}*\n{body}"},
+            requests.post(url, json={"text": f":dart: *New match, {slack_escape(score_label(result))}*\n{body}"},
                           timeout=10).raise_for_status()
         except Exception as e:
             self.log(f"Slack send failed [{_one_line(job.title)}]: {_failure(e)}")
@@ -138,7 +158,7 @@ class Notifier:
         msg["Subject"] = f"[{score_label(result)}] {_one_line(job.title)} at {_one_line(job.company)} ({job.source})"
         msg["From"], msg["To"] = sender, to
         try:
-            with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
                 server.ehlo()
                 server.starttls()
                 server.login(sender, password)

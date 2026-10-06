@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from jobhunter.errors import SettingsError
 from jobhunter.schedule import is_due, is_quiet, read_last_run, write_last_run
 from jobhunter.settings import ScheduleSettings, load_settings
-from tests.helpers import RESUME_TEXT, write_project
+from tests.helpers import write_project
 from tests.test_cli import SETTINGS, cli
 from tests.test_pipeline import BOARDS, SCORERS
 

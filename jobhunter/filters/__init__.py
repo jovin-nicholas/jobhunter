@@ -1,4 +1,4 @@
-"""Filters run before any model: location, then seniority, then keywords, then (when set up) the System One
+"""Filters run before any model: location, then seniority, then keywords, then employment, then (when set up) the System One
 checker. The first skip stops the chain."""
 from __future__ import annotations
 

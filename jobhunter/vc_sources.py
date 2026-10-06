@@ -96,7 +96,10 @@ def _flight_text(page: str) -> str:
     return "".join(parts)
 
 
-def consider_listings(http: Any, settings: dict, cutoff: datetime, log: Callable[[str], None]) -> list[VcListing]:
+def consider_listings(http: Any, settings: dict, cutoff: datetime, log: Callable[[str], None],
+                      failures: list[str] | None = None) -> list[VcListing]:
+    """The boards' newest jobs, read from data inside the Next.js page. A page without it (Consider changed its page)
+    is added to `failures` too, so the run summary shows it rather than only a log line."""
     found: list[VcListing] = []
     for host, name in settings["boards"].items():
         for role in settings["roles"]:
@@ -107,6 +110,9 @@ def consider_listings(http: Any, settings: dict, cutoff: datetime, log: Callable
                 m = _JOBS_KEY.search(text)
                 if not m:
                     log(f"consider [{host}]: no job list found on the page")
+                    if failures is not None:
+                        failures.append(f"consider [{host}]: no job list on the page; its page format may have "
+                                        "changed")
                     continue
                 jobs, _ = json.JSONDecoder().raw_decode(text, m.end())
             except Exception as e:

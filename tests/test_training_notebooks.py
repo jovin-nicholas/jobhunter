@@ -5,7 +5,11 @@ import builtins
 import json
 import sys
 import unittest
+from importlib.util import find_spec
 from pathlib import Path
+
+if find_spec("numpy") is None:          # laya_train needs numpy: the base install (requirements.txt) skips this module
+    raise unittest.SkipTest("needs numpy: pip install -r requirements-train.txt")
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "training"))

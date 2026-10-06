@@ -58,7 +58,8 @@ class GemBoard:
                 ctx.log(f"gem [{slug}/{ext_id}]: failed: {e}")
                 return None
             if not isinstance(post, dict) or not post.get("title"):
-                ctx.mark_gone(key)                   # Gem answers a closed posting with null
+                # Gem answers a closed posting with null, but so might a hiccup; nothing here says closed for good.
+                ctx.log(f"gem [{slug}/{ext_id}]: no posting with a title in the answer; tried again next run")
                 return None
             published = parse_time(post.get("firstPublishedTsSec"))
             if not is_fresh(post.get("firstPublishedTsSec"), limit):
@@ -66,7 +67,7 @@ class GemBoard:
                 return None
             company = ((post.get("job") or {}).get("teamDisplayName") or team or slug).strip()
             where = "; ".join(loc["name"] for loc in post.get("locations") or [] if isinstance(loc, dict) and loc.get("name"))
-            return Job(id=key, title=str(post["title"]).strip(), company=company, location=where or "Remote",
+            return Job(id=key, title=str(post["title"]).strip(), company=company, location=where,
                        url=f"https://jobs.gem.com/{slug}/{ext_id}", posted_at=published.isoformat() if published else "",
                        description=html_to_text(post.get("descriptionHtml") or ""), source="gem", ats="gem",
                        description_is_snippet=False)

@@ -4,9 +4,11 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from jobhunter.models import Job, Resume
+from jobhunter.scorers.prompt import POSTING_END, POSTING_START, UNTRUSTED, fenced
 
 PROMPT = """You are the candidate applying for this role. Write the body of a cover letter: 250-300 words in three
 paragraphs, from the resume and the job below.
+{untrusted}
 
 1. Who you are and why this team's product or technical stack matters to you.
 2. One or two concrete pieces of work from the resume that match the job's requirements, and the trade-offs you made.
@@ -19,14 +21,17 @@ Rules: use only facts from the resume; do not repeat its numbers; never write "I
 RESUME:
 {resume}
 
+{start}
 JOB: {title} at {company}
 {description}
+{end}
 """
 
 
 def build_prompt(job: Job, resume: Resume, max_description_chars: int = 3000) -> str:
-    return PROMPT.format(resume=resume.text, title=job.title, company=job.company,
-                         description=" ".join((job.description or "").split())[:max_description_chars])
+    return PROMPT.format(untrusted=UNTRUSTED, resume=resume.text, start=POSTING_START, end=POSTING_END,
+                         title=fenced(job.title), company=fenced(job.company),
+                         description=fenced(" ".join((job.description or "").split())[:max_description_chars]))
 
 
 def write(writer: Any, job: Job, resume: Resume, log: Callable[[str], None]) -> str | None:

@@ -32,6 +32,23 @@ class TestVcBoards(unittest.TestCase):
         self.assertEqual((j.title, j.company, j.location, j.url, j.source, j.description),
                          ("Platform Engineer", "Beta", "SF", "https://beta.example/careers/platform", "vc_boards", ""))
 
+    def test_a_vc_source_that_could_not_be_read_is_the_boards_problem(self):
+        from jobhunter.boards.vc_boards import VcBoardsBoard
+        disc = Disc([listing("getro_2", "https://beta.example/careers/platform")])
+        disc.failures = ["consider [jobs.a16z.com]: no job list on the page; its page format may have changed"]
+        board = VcBoardsBoard({})
+        ctx = SearchContext(["swe"], ["US"], 72, None, lambda line: None, discovery=disc, is_known=lambda i: False)
+        self.assertEqual([j.id for j in board.search(ctx)], ["getro_2"])
+        self.assertIn("jobs.a16z.com", board.problem)
+        disc.failures = []
+        list(board.search(ctx))
+        self.assertIsNone(board.problem)
+
+    def test_an_unknown_location_is_left_empty_not_called_remote(self):
+        blank = VcListing("getro_9", "Redpoint", "Platform Engineer", "Beta", "", "https://beta.example/careers/9",
+                          "2026-10-06T00:00:00+00:00")
+        self.assertEqual([j.location for j in self.search([blank])], [""])
+
     def test_ats_links_stay_here_when_their_board_is_not_discovering(self):
         logs = []
         jobs = self.search([listing("getro_1", "https://boards.greenhouse.io/acme/jobs/1"),

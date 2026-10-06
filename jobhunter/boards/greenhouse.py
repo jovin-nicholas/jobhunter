@@ -17,8 +17,10 @@ LIST_URL = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 DETAIL_URL = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{job_id}"
 
 
-def _updated(raw: dict) -> str | None:
-    return next((raw[k] for k in ("updated_at", "posted_at", "created_at") if raw.get(k)), None)
+def published_at(raw: dict) -> str | None:
+    """When the posting was first published, for freshness and the stored date: an edit moves `updated_at`, so an old
+    posting edited today would otherwise pass max_age_hours. `updated_at` only when nothing else is given."""
+    return next((raw[k] for k in ("first_published", "created_at", "posted_at", "updated_at") if raw.get(k)), None)
 
 
 _TAG = re.compile(r"<[a-zA-Z/!]")
@@ -39,7 +41,7 @@ def to_job(raw: dict, slug: str) -> Job:
         company=raw.get("company_name") or slug,
         location=(raw.get("location") or {}).get("name", ""),
         url=raw.get("absolute_url", ""),
-        posted_at=raw.get("updated_at", ""),
+        posted_at=published_at(raw) or "",
         description=html_to_text(content),
         source="greenhouse",
         ats="greenhouse",
@@ -65,7 +67,7 @@ class GreenhouseBoard:
 
         def listed(raw: dict, slug: str) -> Job | None:
             key = str(raw["id"])
-            if key in seen or not is_fresh(_updated(raw), limit):
+            if key in seen or not is_fresh(published_at(raw), limit):
                 return None
             job = to_job(raw, slug)
             seen.add(key)
@@ -93,7 +95,7 @@ class GreenhouseBoard:
                 if is_gone(e):
                     ctx.mark_gone(job_id)
                 return None
-            if not is_fresh(_updated(raw), limit):
+            if not is_fresh(published_at(raw), limit):
                 ctx.mark_stale(job_id)
                 return None
             return to_job(raw, p.slug)

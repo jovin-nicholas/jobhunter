@@ -11,6 +11,8 @@ DECIDED = ("notified", "logged", "skipped", "filtered")
 
 
 def _shown_score(row: dict):
+    if row.get("score_label"):
+        return row["score_label"]               # "fit 6.42/10", as the alert showed it
     if row.get("match_score") is not None:
         return row.get("match_score")
     p = row.get("fit_probability")

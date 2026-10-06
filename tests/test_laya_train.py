@@ -5,12 +5,22 @@ import tempfile
 import unittest
 import unittest.mock
 from collections import Counter
+from importlib.util import find_spec
 from pathlib import Path
+
+if find_spec("numpy") is None:          # laya_train needs numpy: the base install (requirements.txt) skips this module
+    raise unittest.SkipTest("needs numpy: pip install -r requirements-train.txt")
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
 import laya_train as lt   # noqa: E402
+
+
+def needs(*packages):
+    """Skips a test when an optional package (requirements-laya.txt, requirements-train.txt) is not installed."""
+    missing = [p for p in packages if find_spec(p) is None]
+    return unittest.skipIf(missing, f"needs {', '.join(missing)}: pip install -r requirements-train.txt")
 
 
 def row(i, label, pool="jobhunter", title=None, company=None):
@@ -177,6 +187,7 @@ class TestHealthAndExport(unittest.TestCase):
         self.assertEqual(lt.input_health(rows, items),
                          {"postings": 2, "no_headings": 1, "empty_requirements": 1, "unknown_headings": 1, "cut": 1})
 
+    @needs("torch", "safetensors")
     def test_export_writes_what_the_scorer_reads(self):
         import torch
         base = Path(tempfile.mkdtemp()); (base / "tokenizer").mkdir(); (base / "encoder").mkdir()
@@ -194,6 +205,7 @@ class TestHealthAndExport(unittest.TestCase):
         scorer = LayaScorer({"model": str(out)}, agent_factory=lambda p, d: None)
         self.assertEqual((scorer.method, scorer.cutoffs()), ("alert", (0.62, 0.3)))
 
+    @needs("torch", "safetensors")
     def test_export_floors_cutoffs_instead_of_rounding(self):
         import torch
         base = Path(tempfile.mkdtemp()); (base / "tokenizer").mkdir(); (base / "encoder").mkdir()
@@ -204,6 +216,7 @@ class TestHealthAndExport(unittest.TestCase):
         # round(0.90006, 4) would give 0.9001, which lifts the cut-off above the job it was fitted on.
         self.assertEqual(saved["training"]["alert"]["alert_at"], 0.9)
 
+    @needs("torch", "safetensors")
     def test_export_casts_floating_tensors_to_the_base_checkpoints_dtype(self):
         import torch
         from safetensors.torch import save_file
@@ -259,7 +272,9 @@ class TestReportText(unittest.TestCase):
 class TestOneTrainingStep(unittest.TestCase):
     def test_one_epoch_on_a_few_items_runs_and_scores(self):
         import torch
-        base = str(Path.home() / "models" / "laya_finetuned")
+        base = os.environ.get("LAYA_SLOW_BASE")
+        if not base:
+            self.skipTest("set LAYA_SLOW_BASE to a fine-tuned Laya checkpoint folder")
         device = torch.device("cpu")
         model, tok, cfg = lt.load_base(base, device)
         settings = lt.Settings(max_len=256, epochs=1, micro_batch=2, grad_accum=1)

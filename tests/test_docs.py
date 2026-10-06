@@ -30,6 +30,26 @@ class TestExample(unittest.TestCase):
         self.assertIn("default: all 13 built-in boards", text)
         self.assertIn("default: every 1h, no quiet time", text)
 
+    def test_the_commented_laya_options_load_when_uncommented(self):
+        import re
+        import tempfile
+
+        import yaml
+
+        from jobhunter.settings import load_settings
+        text = (ROOT / "jobhunter.example.yaml").read_text(encoding="utf-8")
+        names = ("alert_at", "save_at", "stack_roles", "dealbreaker_at", "summary")
+        uncommented = re.sub(rf"^(\s*)# ({'|'.join(names)}):", r"\1\2:", text, flags=re.M)
+        self.assertNotEqual(uncommented, text)
+        laya = next(s["laya"] for s in yaml.safe_load(uncommented)["scorers"] if "laya" in s)
+        self.assertEqual(set(names) | {"model"}, set(laya))
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "resumes").mkdir()
+            (Path(tmp) / "resumes" / "resume.pdf").write_text("resume")
+            (Path(tmp) / "jobhunter.yaml").write_text(uncommented, encoding="utf-8")
+            settings = load_settings(Path(tmp) / "jobhunter.yaml", env={})
+        self.assertEqual(settings.scorers[0].options["save_at"], 0.3)
+
 
 if __name__ == "__main__":
     unittest.main()

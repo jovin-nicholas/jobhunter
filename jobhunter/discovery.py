@@ -41,6 +41,7 @@ class Discovery:
         self.cache_path, self.max_age_hours = cache_path, max_age_hours
         self._urls: set[str] | None = None
         self._listings: list[VcListing] | None = None
+        self.failures: list[str] = []       # VC sources that could not be read this run, for vc_boards' summary
         self._lock = threading.Lock()
 
     def urls(self) -> set[str]:
@@ -77,7 +78,7 @@ class Discovery:
                 new += getro_listings(self.http, self.settings.getro, cutoff, cached.__contains__, self.log,
                                       complete=complete, finished=finished)
             if self.settings.consider:
-                new += consider_listings(self.http, self.settings.consider, cutoff, self.log)
+                new += consider_listings(self.http, self.settings.consider, cutoff, self.log, self.failures)
             for listing in new:
                 cached.setdefault(listing.key, listing)
             self._listings = list(cached.values())

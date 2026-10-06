@@ -12,6 +12,8 @@ import json
 import random
 import re
 import shutil
+import tempfile
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,6 +30,8 @@ from jobhunter.models import Job, SearchContext
 from jobhunter.registry import board
 from jobhunter.text_clean import html_to_text
 
+# Pinned: npx would otherwise fetch and run whatever version was published last, on every run.
+MCP_PACKAGE = "linkedin-jobs-mcp@1.0.0"
 _DIGITS = re.compile(r"\d+")
 GUEST_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{number}"
 _JOB_NUMBER = re.compile(r"/view/[^?#]*?(\d{6,})/?(?:[?#]|$)")
@@ -128,14 +132,47 @@ def find_npx(configured: str | None) -> str:
                        "out of boards")
 
 
-@asynccontextmanager
-async def _stdio_session(npx_option: str | None):
+_NEEDS_MCP = "needs the `mcp` package: .venv/bin/pip install -r requirements.txt"
+
+
+_process_dir: Path | None = None           # private_dir(None)'s folder, made once per process
+_process_dir_lock = threading.Lock()
+
+
+def private_dir(data_dir: Path | None) -> Path:
+    """A folder only this user can read, for npx to run in: `<data_dir>/npx` (mode 0700), or, when the data folder is
+    not known, one private temp folder for the whole process. Not the repo folder that holds `.env`, and not the shared
+    temp folder."""
+    global _process_dir
+    if data_dir is None:
+        with _process_dir_lock:
+            if _process_dir is None or not _process_dir.is_dir():
+                _process_dir = Path(tempfile.mkdtemp(prefix="jobhunter-npx-"))      # created 0700
+            return _process_dir
+    folder = Path(data_dir) / "npx"
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder.chmod(0o700)                                             # mkdir's mode is masked by umask
+    return folder
+
+
+def server_params(npx_option: str | None, cwd: Path | None = None):
+    """The pinned server, started in a private folder (private_dir) rather than the repo folder that holds `.env`."""
     try:
-        from mcp import ClientSession, StdioServerParameters
+        from mcp import StdioServerParameters
+    except ImportError as e:
+        raise BoardSkipped(_NEEDS_MCP) from e
+    return StdioServerParameters(command=find_npx(npx_option), args=["-y", MCP_PACKAGE],
+                                 cwd=str(cwd if cwd is not None else private_dir(None)))
+
+
+@asynccontextmanager
+async def _stdio_session(npx_option: str | None, cwd: Path | None = None):
+    try:
+        from mcp import ClientSession
         from mcp.client.stdio import stdio_client
     except ImportError as e:
-        raise BoardSkipped("needs the `mcp` package: .venv/bin/pip install -r requirements.txt") from e
-    params = StdioServerParameters(command=find_npx(npx_option), args=["-y", "linkedin-jobs-mcp"])
+        raise BoardSkipped(_NEEDS_MCP) from e
+    params = server_params(npx_option, cwd)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -154,7 +191,7 @@ class LinkedInBoard:
         max_hours_old: int = 1        # drop listings LinkedIn marks as older ("2 hours ago"), when it says
         npx: str | None = None        # full path to npx when it is not on PATH
 
-    def __init__(self, options: dict, session_factory: Callable[[str | None], Any] | None = None):
+    def __init__(self, options: dict, session_factory: Callable[[str | None, Path], Any] | None = None):
         self.options = self.Options(**options)
         self._open_session = session_factory or _stdio_session
 
@@ -184,7 +221,7 @@ class LinkedInBoard:
 
     async def _search(self, ctx: SearchContext) -> list[Job]:
         o, jobs, seen = self.options, [], set()
-        async with self._open_session(o.npx) as session:
+        async with self._open_session(o.npx, private_dir(getattr(ctx, "data_dir", None))) as session:
             for query in ctx.queries:
                 for location in ctx.locations or [""]:
                     found = await self._call(session, ctx, query, location)

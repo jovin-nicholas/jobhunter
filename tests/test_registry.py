@@ -130,5 +130,13 @@ def _list_options():
     return Options
 
 
+
+class TestPublicApi(unittest.TestCase):
+    def test_plugins_can_import_board_skipped_from_the_package(self):
+        import jobhunter
+        from jobhunter.errors import BoardSkipped
+        self.assertIs(jobhunter.BoardSkipped, BoardSkipped)
+        self.assertIn("BoardSkipped", jobhunter.__all__)
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,8 +5,9 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from jobhunter.models import Job, ScoreResult
+from jobhunter.models import Job, ScoreResult, score_label
 from jobhunter.store import Store
+from tests.helpers import status_counts
 
 
 def job(i, **kw):
@@ -42,7 +43,7 @@ class TestStore(unittest.TestCase):
         self.assertEqual(json.loads(one["matched_skills"]), ["java"])
         self.assertEqual((two["status"], two["filter_reason"], two["match_score"]),
                          ("filtered", "seniority: requires 5+ years (max 3)", None))
-        self.assertEqual(self.store.status_counts(), {"filtered": 1, "logged": 1})
+        self.assertEqual(status_counts(self.store), {"filtered": 1, "logged": 1})
 
     def test_old_database_gets_the_new_columns(self):
         old = Path(tempfile.mkdtemp()) / "jobs.db"
@@ -89,6 +90,27 @@ class TestProbability(unittest.TestCase):
         Store(path)
         with closing(sqlite3.connect(path)) as conn:
             self.assertEqual(conn.execute("select fit_probability from jobs where id='a'").fetchone(), (None,))
+
+    def test_the_score_label_is_stored_and_read_back_for_the_test_alert(self):
+        store = Store(Path(tempfile.mkdtemp()) / "jobs.db")
+        store.save(job(1), "notified", ScoreResult(score=6.4231, model="laya", decision="notify", probability=0.6,
+                                                   label="fit 6.42/10"), resume_id="r.txt")
+        _, result, _ = store.last_notified()
+        self.assertEqual(score_label(result), "fit 6.42/10")
+        store.save(job(2), "notified", ScoreResult(score=8, model="ollama", decision="notify"))
+        _, result, _ = store.last_notified()
+        self.assertEqual(score_label(result), "8/10")                 # no label stored: shown from the score
+
+    def test_existing_database_gains_score_label(self):
+        path = Path(tempfile.mkdtemp()) / "jobs.db"
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, title TEXT, status TEXT)")
+            conn.execute("INSERT INTO jobs VALUES ('a', 'Old', 'notified')")
+            conn.commit()
+        Store(path)
+        with closing(sqlite3.connect(path)) as conn:
+            self.assertEqual(conn.execute("select score_label from jobs where id='a'").fetchone(), (None,))
+
 
 class TestFeedback(unittest.TestCase):
     def setUp(self):

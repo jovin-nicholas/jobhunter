@@ -155,6 +155,12 @@ class TestAddressChecks(unittest.TestCase):
         self.assertEqual(classify("https://tailnet.example.com/job", lambda host: ["100.100.1.1"]), (False, False))
         self.assertEqual(classify("https://www.linkedin.com/jobs/view/1", PUBLIC), (True, True))
 
+    def test_dover_links_on_both_domains_are_job_board_sites(self):
+        for url in ("https://app.dover.com/apply/moda/a", "https://app.dover.io/apply/moda/a"):
+            with self.subTest(url=url):
+                self.assertEqual(classify(url, PUBLIC), (True, True))
+        self.assertEqual(classify("https://notdover.com/x", PUBLIC), (True, False))
+
     def test_a_redirect_to_a_private_address_is_not_followed(self):
         http = Pages({"https://www.linkedin.com/jobs/view/1": redirect("http://127.0.0.1:8080/admin")})
         self.assertEqual(fetch_description(http, "https://www.linkedin.com/jobs/view/1", lambda line: None,

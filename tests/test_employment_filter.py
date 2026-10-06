@@ -23,9 +23,12 @@ class TestContractTitleWords(unittest.TestCase):
             "Software Engineer - C2C": "c2c",
             "Software Engineer - Corp to Corp": "corp to corp",
             "Software Engineer - Corp-to-Corp": "corp to corp",
-            "Software Engineer (1099)": "1099",
+            "Software Engineer (1099 Only)": "1099 only",
             "Software Engineer - W2 Contract": "w2 contract",
-            "Temp Software Engineer": "temp",
+            "Software Engineer (Temp)": "temp",
+            "Software Engineer - Temp": "temp",
+            "Temp Role: Software Engineer": "temp",
+            "Software Engineer, Temp Position": "temp",
             "Temporary Software Engineer": "temporary",
             "Freelance Software Engineer": "freelance",
         }
@@ -35,8 +38,10 @@ class TestContractTitleWords(unittest.TestCase):
                 self.assertFalse(result.keep, title)
                 self.assertEqual(result.reason, f"contract: {snippet}")
 
-    def test_contracts_as_a_noun_is_not_a_contract_word(self):
-        for title in ("Contracts Analyst", "Smart Contracts Engineer"):
+    def test_words_that_only_look_like_contract_words_are_kept(self):
+        for title in ("Contracts Analyst", "Smart Contracts Engineer", "Smart Contract Engineer",
+                      "Senior Smart Contract Developer", "Temp Sensor Firmware Engineer", "Temperature Controls Engineer",
+                      "Temp Software Engineer"):
             with self.subTest(title=title):
                 self.assertTrue(f().check(job(title)).keep, title)
 
@@ -52,17 +57,32 @@ class TestContractDescriptionPhrases(unittest.TestCase):
             "This is a 6 months contract engagement.": "6 months contract",
             "This is a six month contract engagement.": "six month contract",
             "Duration: Contract": "duration: contract",
+            "Duration: 6 months contract": "6 months contract",
+            "Duration: 6 months (contract)": "duration: 6 months (contract",
             "Duration: 6 months": "duration: 6 months",
+            "Duration: 6 Months +": "duration: 6 months +",
+            "Duration: 12+ Months with possible extension": "duration: 12+ months",
+            "Duration: 3+ Month": "duration: 3+ month",
+            "Duration: 6 months. Training provided.": "duration: 6 months",
+            "Duration: 6 months\nOnboarding: two weeks": "duration: 6 months",
             "Employment Type: Contract": "employment type: contract",
             "Employment Type: Temporary": "employment type: temporary",
             "Job Type: Contract": "job type: contract",
             "Position Type - Contract": "position type - contract",
             "We need C2C candidates only.": "c2c",
             "Open to Corp to Corp arrangements.": "corp to corp",
-            "1099 candidates welcome.": "1099",
+            "Paid on 1099 for the first year.": "on 1099",
+            "This is a 1099 contract.": "1099 contract",
+            "1099 or C2C welcome.": "1099 or c2c",
+            "C2C or 1099 welcome.": "c2c or 1099",
+            "Work as a contractor with our team.": "as a contractor",
+            "This is an independent contractor engagement.": "independent contractor",
+            "A contractor role on the payments team.": "contractor role",
+            "A contractor position on the payments team.": "contractor position",
             "This is a W2 Contract engagement.": "w2 contract",
             "W2 Only, no exceptions.": "w2 only",
-            "Not a 1099 job. Only W2.": "1099",
+            "Not a 1099 job. Only W2.": "only w2",
+            "W2 only, full time with benefits.": "w2 only",
             "Only W2 candidates, no third parties.": "only w2",
         }
         for description, snippet in cases.items():
@@ -79,7 +99,12 @@ class TestContractDescriptionPhrases(unittest.TestCase):
     def test_negative_phrases_are_kept(self):
         for description in ("We manage vendor contracts for clients.", "We build smart contracts on-chain.",
                             "Must honor contractual obligations.", "Experience with government contracts a plus.",
-                            "No subcontract work is involved."):
+                            "No subcontract work is involved.", "Form 1099 processing for fintech clients.",
+                            "Experience with 1099 tax forms.",
+                            "Duration: 12 months onboarding program.", "Duration: 6 months of paid training",
+                            "Duration: 12 month rotation program", "Duration: 3 months internship",
+                            "We pay our subcontractor partners promptly.", "Contractors we work with love us.",
+                            "Build smart contract tooling for DeFi."):
             with self.subTest(description=description):
                 self.assertTrue(f().check(job(description=description)).keep, description)
 
@@ -141,7 +166,7 @@ class TestHourlyPay(unittest.TestCase):
             "This offers an hourly rate of $40.": "hourly rate of $40",
             "$40 hourly, paid weekly.": "$40 hourly",
             "Pay is USD 40 per hour.": "usd 40 per hour",
-            "Pay: 50/hr": "50/hr",
+            "Pay: 40 USD per hour": "40 usd per hour",
         }
         for description, snippet in cases.items():
             with self.subTest(description=description):
@@ -149,12 +174,25 @@ class TestHourlyPay(unittest.TestCase):
                 self.assertFalse(result.keep, description)
                 self.assertEqual(result.reason, f"hourly pay: {snippet}")
 
+    def test_a_rate_in_the_title_needs_no_currency(self):
+        for title, snippet in (("Data Engineer 65/hr W2", "65/hr"), ("Java Developer - 70 per hour", "70 per hour"),
+                               ("Python Developer $60/hr", "$60/hr")):
+            with self.subTest(title=title):
+                result = f(exclude=["hourly"]).check(job(title))
+                self.assertFalse(result.keep, title)
+                self.assertEqual(result.reason, f"hourly pay: {snippet}")
+        self.assertTrue(f(exclude=["hourly"]).check(job("Platform Engineer", description="Pay: 50/hr")).keep)
+        self.assertTrue(f(exclude=["hourly"]).check(job("Backend Engineer 24/7 On-call")).keep)
+
     def test_boilerplate_without_a_number_is_kept(self):
         for description in ("Please review the salary or hourly rate offered.",
                             "This posting lists a base hourly rate or base annual full-time salary.",
                             "Pay shown is an annualized hourly rate.",
                             "The hourly rate or salary will be discussed in the interview.",
-                            "Employees may be paid hourly or salaried."):
+                            "Employees may be paid hourly or salaried.",
+                            "Our engine processes 10,000/hr transactions.", "We hold a 500 per hour SLA.",
+                            "Salary $150k with overtime of 1.5 per hour.", "Pay: 50/hr",
+                            "PTO accrues at 1.54 per hour worked.", "Join the on-call 1/hr rotation."):
             with self.subTest(description=description):
                 self.assertTrue(f().check(job(description=description)).keep, description)
 

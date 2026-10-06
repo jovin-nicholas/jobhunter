@@ -9,3 +9,9 @@ __pycache__/
 .DS_Store
 logs/
 .superpowers/
+# Personal training files: feedback exports, the scoring resume and training pools
+feedback_labels.csv
+/scoring_resume.txt
+pool_*.jsonl
+heldout_ids.txt
+upload_*/

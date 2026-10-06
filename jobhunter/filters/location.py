@@ -133,7 +133,7 @@ class LocationFilter:
     def _rules(self, job: Job) -> FilterResult:
         location = (job.location or "").strip()
         if not location:
-            return skip("no location given")
+            return self._from_title_and_description(job, location)  # boards leave an unknown location empty
         results = [self._check_place(place, job) for place in _places(location)]
         if any(r is not None and r.keep for r in results):
             return KEEP                     # a list of places: one allowed place is enough
@@ -194,7 +194,8 @@ class LocationFilter:
         return None
 
     def _from_title_and_description(self, job: Job, location: str) -> FilterResult:
-        """The location field names no place: the title ("Intern (2027) - Austin, TX"), then the description."""
+        """The location field is empty or names no place: the title ("Intern (2027) - Austin, TX"), then the
+        description. Still undecided, it goes to System One's location question when one is set up."""
         for text in (job.title or "", (job.description or "")[:2000]):
             words, codes = word_text(text), _city_code_pairs(text)
             for spec in self.allowed.values():
@@ -202,7 +203,9 @@ class LocationFilter:
                         or codes & set(spec["region_codes"]):
                     return KEEP
             if any(has_term(words, other) for other in self.others):
-                return skip(f"location outside allowed countries: {location} ({text[:60]})")
+                return skip(f"location outside allowed countries: {location or 'none given'} ({text[:60]})")
+        if not location:
+            return skip("no location given, and no place named in the title or description")
         return skip(f"no place named in the location ({location}), title or description")
 
 

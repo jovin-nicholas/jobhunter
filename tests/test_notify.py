@@ -56,6 +56,12 @@ class TestNotifier(unittest.TestCase):
         self.assertIn("[fit 72%]", email.message_from_string(raw)["Subject"])
         self.assertNotIn("None/10", post.call_args.kwargs["json"]["text"])
 
+    def test_smtp_has_a_timeout(self):
+        smtp = MagicMock()
+        with patch("jobhunter.notify.smtplib.SMTP", return_value=smtp) as factory:
+            Notifier(NotifySettings(email=BOTH.email), env=ENV).send(JOB, RESULT, "backend.txt")
+        self.assertEqual(factory.call_args.kwargs.get("timeout"), 30)
+
 
 class TestDelivery(unittest.TestCase):
     def test_send_says_whether_any_channel_delivered(self):
@@ -83,6 +89,29 @@ class TestDelivery(unittest.TestCase):
         self.assertEqual(len(logs), 2)
         self.assertFalse(any("hooks.example" in line or "/abc" in line for line in logs), logs)
         self.assertIn("404", logs[0])
+
+    def test_slack_text_is_escaped_and_only_web_links_are_linked(self):
+        slack_only = NotifySettings(slack={"webhook_env": "SLACK_WEBHOOK_URL"})
+        result = ScoreResult(score=8, model="m", decision="notify", reasoning="Fits <@U123> & more",
+                             matched_skills=["c<b>"])
+
+        def text(job):
+            with patch("jobhunter.notify.requests.post", return_value=FakeResponse()) as post:
+                Notifier(slack_only, env=ENV).send(job, result, "backend.txt", cover_letter="Hi <!here>")
+            return post.call_args.kwargs["json"]["text"]
+
+        sent = text(Job("dice_3", "<!channel> Hiring", "A&B <Corp>", "Austin <TX>",
+                        "https://example.com/3?a=1&b=2|x>y", source="dice"))
+        self.assertNotIn("<!channel>", sent)
+        self.assertNotIn("<!here>", sent)
+        self.assertNotIn("<@U123>", sent)
+        for escaped in ("&lt;!channel&gt; Hiring", "A&amp;B &lt;Corp&gt;", "Austin &lt;TX&gt;",
+                        "Fits &lt;@U123&gt; &amp; more", "c&lt;b&gt;", "Hi &lt;!here&gt;"):
+            self.assertIn(escaped, sent)
+        self.assertIn("<https://example.com/3?a=1&amp;b=2%7Cx%3Ey|Open job>", sent)
+        bad = text(Job("dice_4", "Engineer", "Acme", "Austin", "javascript:alert(1)<x|y>", source="dice"))
+        self.assertNotIn("<javascript:", bad)
+        self.assertIn("javascript:alert(1)&lt;x|y&gt;", bad)
 
     def test_a_title_with_a_line_break_still_emails(self):
         smtp = MagicMock()

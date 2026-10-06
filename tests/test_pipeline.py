@@ -10,7 +10,7 @@ from jobhunter.errors import SettingsError
 from jobhunter.models import Job
 from jobhunter.pipeline import bootstrap, run
 from jobhunter.store import Store
-from tests.helpers import RESUME_TEXT, write_project
+from tests.helpers import status_counts, write_project
 
 BOARDS = """
 import time
@@ -257,10 +257,10 @@ class TestStaleMemory(unittest.TestCase):
         store = self.run_board(dry_run=False)
         self.assertTrue(store.is_terminal("stale_1"))
         self.assertTrue(store.is_terminal("gone_1"))
-        self.assertEqual(store.status_counts(), {"gone": 1, "stale": 1})
+        self.assertEqual(status_counts(store), {"gone": 1, "stale": 1})
 
     def test_dry_run_remembers_nothing(self):
-        self.assertEqual(self.run_board(dry_run=True).status_counts(), {})
+        self.assertEqual(status_counts(self.run_board(dry_run=True)), {})
 
 
 class TestSearchContext(unittest.TestCase):
@@ -406,6 +406,38 @@ class TestLeanBoards(unittest.TestCase):
         self.assertIsNone(summary["needs_node"].failed)
         self.assertIn("needs Node.js", summary["needs_node"].skipped_reason)
         self.assertTrue(any(line.startswith("[needs_node] skipped: needs Node.js") for line in logs), logs)
+
+
+PROBLEM = """
+from jobhunter import Job, board
+
+
+@board("half_read")
+class HalfRead:
+    def __init__(self, options):
+        self.problem = None
+
+    def search(self, ctx):
+        self.problem = "consider [jobs.a16z.com]: no job list on the page"
+        yield Job("half_1", "Great Engineer", "Acme", "Remote - US", "https://example.com/h1", description="Java")
+"""
+
+
+class TestBoardProblems(unittest.TestCase):
+    def test_a_problem_a_board_reports_shows_in_the_summary_and_its_jobs_still_count(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = ("resumes: {folder: resumes, default: backend.txt}\n"
+                    "search: {queries: [swe], locations: [Remote], fetch_descriptions: false}\n"
+                    "boards: [half_read]\nscorers: [fixed]\ndiscovery: {github_readmes: []}\n"
+                    "decisions: {notify_at: 7, log_at: 5}\n")
+        app = bootstrap(write_project(tmp, settings, plugins={"problem.py": PROBLEM, "scorers.py": SCORERS}), env={})
+        logs = []
+        summary = run(app, Store(tmp / "data" / "jobs.db"), FakeNotifier(), log=logs.append)
+        self.assertEqual(summary["half_read"].problem, "consider [jobs.a16z.com]: no job list on the page")
+        self.assertEqual(summary["half_read"].notified, 1)
+        line = next(l for l in logs if l.startswith("[half_read]"))
+        self.assertIn("notified 1", line)
+        self.assertIn("PROBLEM: consider [jobs.a16z.com]", line)
 
 
 GARBLED = """
@@ -668,6 +700,30 @@ class TestVcCachePath(PipelineTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScorerErrorsAreRetriedForADay(PipelineTestCase):
+    def test_a_job_every_scorer_failed_on_is_retried_then_final_after_24_hours(self):
+        from jobhunter.errors import ScorerError
+        from jobhunter.scorers.chain import ScorerChain
+
+        class Garbled:
+            def score(self, job, resume):
+                raise ScorerError("no JSON object in the model's reply")
+        self.app.chain = ScorerChain([("garbled", Garbled())], self.app.settings.decisions)
+        self.run_once()
+        status = {k: v[0] for k, v in self.rows().items()}
+        self.assertEqual(status["fake_0"], "error_scorer")
+        self.assertIn("fake_0", {j.id for j in self.store.retry_candidates()})
+        self.run_once()
+        self.assertEqual(self.rows()["fake_0"][0], "error_scorer")          # still inside its 24 hours
+        day_ago = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        with closing(sqlite3.connect(self.store.path)) as conn, conn:
+            conn.execute("UPDATE jobs SET first_run_at = ? WHERE id = 'fake_0'", (day_ago,))
+        self.run_once()
+        self.assertEqual(self.rows()["fake_0"][0], "error_terminal")
+        self.run_once()
+        self.assertEqual(self.rows()["fake_0"][0], "error_terminal")        # final: never scored again
 
 
 class FailingNotifier(FakeNotifier):

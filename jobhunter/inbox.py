@@ -22,8 +22,13 @@ _ALL_MAIL = "[Gmail]/All Mail"            # the English name; other languages ar
 _LIST_RE = re.compile(rb'\((?P<flags>[^)]*)\) "[^"]*" "?(?P<name>[^"]+)"?$')
 # One FETCH for every message; PEEK so reading does not mark it read; INTERNALDATE (when Gmail received it) for a
 # message without a Date header.
-_HEADERS = "(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"
+_HEADERS = "(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID AUTHENTICATION-RESULTS)])"
 _UID_RE = re.compile(rb"\bUID (\d+)")
+# Gmail's own Authentication-Results header ("mx.google.com; dkim=pass header.i=@example.com; spf=pass ..."); one
+# naming another server could have been written by the sender.
+GMAIL_AUTHSERV = "mx.google.com"
+_PASS_RE = re.compile(r"^\s*(?:dkim|spf|dmarc)\s*=\s*pass\b(?P<rest>.*)$", re.I | re.S)
+_IDENTITY_RE = re.compile(r"\b(?:header\.i|header\.d|header\.from|smtp\.mailfrom)\s*=\s*(?P<id>[^\s;]+)", re.I)
 
 
 class _Refused(Exception):
@@ -88,6 +93,26 @@ def _when(value: str | None, received: bytes = b"") -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def authenticated(msg: Any, sender: str) -> bool | None:
+    """Whether Gmail's Authentication-Results header shows dkim=pass, spf=pass or dmarc=pass for the From address's
+    domain or a subdomain of it (mail.example.com for example.com); None when Gmail added no such header (a message
+    sent to yourself from Gmail may have none)."""
+    gmail = [str(h) for h in msg.get_all("Authentication-Results") or []
+             if str(h).strip().lower().startswith(GMAIL_AUTHSERV)]
+    if not gmail:
+        return None
+    domain = sender.rpartition("@")[2].lower()
+    for part in gmail[0].split(";")[1:]:            # the topmost one is Gmail's, added when the message arrived
+        m = _PASS_RE.match(part)
+        if not m:
+            continue
+        for identity in _IDENTITY_RE.findall(m.group("rest")):
+            found = identity.rpartition("@")[2].lower().strip(".")
+            if domain and (found == domain or found.endswith("." + domain)):
+                return True
+    return False
+
+
 def _addresses(value: str) -> set[str]:
     """Every address in a header-style value: "Name <a@b>, c@d" gives {"a@b", "c@d"}, lower case."""
     return {addr.lower() for _, addr in getaddresses([value or ""]) if addr}
@@ -117,21 +142,33 @@ def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, 
         uids = (data[0] or b"").decode().split() if data else []
         if not uids:
             return summary
-        rows = []
+        rows, unchecked, refused = [], 0, 0
         _, parts = conn.uid("FETCH", ",".join(uids), _HEADERS)
         for prefix, raw in (p for p in parts or [] if isinstance(p, tuple) and len(p) == 2):
             if not _UID_RE.search(prefix or b""):
                 continue
             msg = message_from_bytes(raw or b"")
             parsed = parse_subject(_text(msg["Subject"]))
-            if parseaddr(msg["From"] or "")[1].lower() not in allowed:
+            from_address = parseaddr(msg["From"] or "")[1].lower()
+            checked = authenticated(msg, from_address) if from_address in allowed else None
+            if from_address not in allowed:
                 summary.ignored["foreign sender"] += 1
+            elif checked is False:
+                summary.ignored["not authenticated"] += 1     # the From address may be forged
+                refused += 1
             elif not parsed:
                 summary.ignored["bad subject"] += 1
             else:
                 mid = (msg["Message-ID"] or "").strip() or "sha1:" + hashlib.sha1(raw).hexdigest()
                 rows.append({"job_id": parsed[1], "verdict": parsed[0], "received_at": _when(msg["Date"], prefix),
                              "message_id": mid})
+                unchecked += checked is None
+        if refused:
+            log(f"feedback: {refused} message(s) from your address failed Gmail's DKIM, SPF and DMARC checks; "
+                "ignored")
+        if unchecked:
+            log(f"feedback: {unchecked} message(s) had no Authentication-Results header from Gmail; trusted by "
+                "their From address alone")
         known = store.existing_ids([r["job_id"] for r in rows]) if rows else set()
         if any(r["job_id"] not in known for r in rows):
             summary.ignored["unknown job"] += sum(r["job_id"] not in known for r in rows)

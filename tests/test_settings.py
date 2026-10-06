@@ -174,6 +174,16 @@ class TestLeanSettings(unittest.TestCase):
         self.assertFalse(boards["linkedin"].enabled)
         self.assertIsNone(boards["dice"].timeout_s)
 
+    def test_missing_sections_ask_only_for_their_required_keys(self):
+        text = "scorers: [ollama]\n"
+        with self.assertRaises(SettingsError) as err:
+            load_settings(write_project(self.tmp, text, RESUMES), env={})
+        problems = "\n".join(err.exception.problems)
+        self.assertIn("resumes: missing: needs `default`", problems)
+        self.assertIn("search: missing: needs `queries`", problems)
+        self.assertNotIn("`folder`", problems)
+        self.assertNotIn("`locations`", problems)
+
     def test_bad_board_lists(self):
         for text, message in (("boards: []\n", "no boards listed"), ("boards: [dice, 3]\n", "board names")):
             with self.assertRaises(SettingsError) as err:

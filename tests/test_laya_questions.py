@@ -1,5 +1,5 @@
-"""Tests for the questions method in training/laya_train.py (docs/specs/2026-10-05-laya-questions-finetune-design.md).
-Invented jobs only."""
+"""Tests for the questions method in training/laya_train.py: three questions (stack role, dealbreaker, fit) combined by
+gates and fitted cut-offs. Invented jobs only."""
 import json
 import os
 import sys
@@ -8,12 +8,22 @@ import unittest
 import unittest.mock
 import warnings
 from collections import Counter
+from importlib.util import find_spec
 from pathlib import Path
+
+if find_spec("numpy") is None:          # laya_train needs numpy: the base install (requirements.txt) skips this module
+    raise unittest.SkipTest("needs numpy: pip install -r requirements-train.txt")
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
 import laya_train as lt   # noqa: E402
+
+
+def needs(*packages):
+    """Skips a test when an optional package (requirements-laya.txt, requirements-train.txt) is not installed."""
+    missing = [p for p in packages if find_spec(p) is None]
+    return unittest.skipIf(missing, f"needs {', '.join(missing)}: pip install -r requirements-train.txt")
 
 
 def qrow(i, label="skip", pool="jobhunter", role="backend", deal=None, score=None, title=None, company=None,
@@ -151,6 +161,7 @@ class FakeTok:
     pad_token_id = 0
 
 
+@needs("laya")
 class TestQuestionItems(unittest.TestCase):
     def setUp(self):
         from laya.common import render_options
@@ -342,6 +353,7 @@ def tiny_model():
 
 
 class TestQuestionLoss(unittest.TestCase):
+    @needs("torch")
     def test_advantage_floors_a_narrow_row_at_the_batch_std(self):
         import torch
         # column 0: a near-saturated row (tiny spread, e.g. a confident, correct dealbreaker row); column 1: a row
@@ -354,6 +366,7 @@ class TestQuestionLoss(unittest.TestCase):
         self.assertLess(abs(out[0, 0]), 0.5)
         self.assertGreater(abs(out[0, 1]), 0.5)
 
+    @needs("torch", "laya")
     def test_mixed_batch_and_question_weights(self):
         import torch
         from laya.common import collate_items
@@ -373,6 +386,7 @@ class TestQuestionLoss(unittest.TestCase):
         np.testing.assert_allclose(rows0.numpy(), rows.numpy(), rtol=1e-6)
         self.assertAlmostEqual(float(loss0.detach()), float(rows[:2].sum() / 3), places=5)
 
+    @needs("torch", "laya")
     def test_one_step_raises_the_true_option_probability(self):
         import torch
         from laya.common import collate_items
@@ -392,6 +406,7 @@ class TestQuestionLoss(unittest.TestCase):
 
 
 class TestQuestionTraining(unittest.TestCase):
+    @needs("torch", "laya")
     def test_predictions_keep_every_option(self):
         import torch
 
@@ -417,6 +432,7 @@ class TestQuestionTraining(unittest.TestCase):
         self.assertEqual((c.alerts, c.precision, c.met_rule), (2, 1.0, True))
         self.assertAlmostEqual(c.recall, 2 / 3)
 
+    @needs("torch", "laya")
     def test_train_loop_runs_on_a_tiny_model(self):
         import torch
         train_items = [item("stack_role", i % 7) for i in range(8)] + [item("dealbreaker", i % 2) for i in range(8)] \
@@ -584,6 +600,7 @@ class TestQuestionsReport(unittest.TestCase):
 
 
 class TestQuestionsExport(unittest.TestCase):
+    @needs("torch", "safetensors")
     def test_export_fields(self):
         import torch
         base = Path(tempfile.mkdtemp()); (base / "tokenizer").mkdir(); (base / "encoder").mkdir()
@@ -608,6 +625,7 @@ class TestQuestionsExport(unittest.TestCase):
         self.assertEqual(t["report"], {"select": 0.5})
         self.assertTrue((out / "model.safetensors").is_file())
 
+    @needs("torch", "safetensors")
     def test_inherited_temperatures_outside_the_fitted_buckets_are_clamped(self):
         # choice:11+ is not a bucket we fit (none of our three questions has 11+ options): it is carried from the
         # base checkpoint as-is today, which is how an invalid/out-of-range value (laya's clamp range is [0.5, 5])
@@ -668,17 +686,25 @@ class TestBenchmarkArithmetic(unittest.TestCase):
         self.assertEqual(hybrid["worth_range"], [round(lo, 3), round(hi, 3)])
 
     def test_go_needs_better_alerts_and_as_many_caught(self):
-        self.assertTrue(lt.go_no_go({"worth": 18 / 40, "caught": 18}))
-        self.assertFalse(lt.go_no_go({"worth": 18 / 43, "caught": 18}))      # equal to the baseline is not better
-        self.assertFalse(lt.go_no_go({"worth": 9 / 20, "caught": 9}))        # better alerts, fewer good jobs
-        self.assertFalse(lt.go_no_go({"worth": 0.0, "caught": 0}))
+        baseline = {"alerts": 20, "caught": 8, "good": 16}                  # an invented current setup
+        self.assertTrue(lt.go_no_go({"worth": 8 / 18, "caught": 8}, baseline))
+        self.assertFalse(lt.go_no_go({"worth": 8 / 20, "caught": 8}, baseline))      # equal is not better
+        self.assertFalse(lt.go_no_go({"worth": 4 / 8, "caught": 4}, baseline))       # better alerts, fewer good jobs
+        self.assertFalse(lt.go_no_go({"worth": 0.0, "caught": 0}, baseline))
+
+    def test_there_is_no_built_in_baseline(self):
+        import inspect
+        self.assertFalse(hasattr(lt, "BASELINE"))
+        self.assertIs(inspect.signature(lt.go_no_go).parameters["baseline"].default, inspect.Parameter.empty)
 
 
 @unittest.skipUnless(os.environ.get("LAYA_SLOW_TESTS"), "set LAYA_SLOW_TESTS=1 to load a real checkpoint")
 class TestOneQuestionsTrainingStep(unittest.TestCase):
     def test_one_epoch_with_all_three_questions(self):
         import torch
-        base = os.environ.get("LAYA_SLOW_BASE", str(Path.home() / "models" / "laya_finetuned"))
+        base = os.environ.get("LAYA_SLOW_BASE")
+        if not base:
+            self.skipTest("set LAYA_SLOW_BASE to a fine-tuned Laya checkpoint folder")
         device = torch.device("cpu")
         model, tok, _ = lt.load_base(base, device)
         settings = lt.Settings(job_max_len=320, max_len=384, epochs=1, micro_batch=2, grad_accum=1)
@@ -702,7 +728,9 @@ class TestQuestionsExportRoundTrip(unittest.TestCase):
         only read, then its own state_dict is round-tripped through the export)."""
         import torch
         from laya.agent import Agent
-        base = os.environ.get("LAYA_SLOW_BASE", str(Path.home() / "models" / "laya_finetuned"))
+        base = os.environ.get("LAYA_SLOW_BASE")
+        if not base:
+            self.skipTest("set LAYA_SLOW_BASE to a fine-tuned Laya checkpoint folder")
         device = torch.device("cpu")
         model, tok, cfg = lt.load_base(base, device)
         settings = lt.Settings(job_max_len=320, max_len=384, epochs=1, micro_batch=2, grad_accum=1)

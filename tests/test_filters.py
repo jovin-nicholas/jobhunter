@@ -37,7 +37,32 @@ class TestLocation(unittest.TestCase):
 
     def test_named_other_countries_and_missing_location_are_skipped(self):
         self.assertFalse(self.us.check(job(location="Remote, Canada")).keep)
-        self.assertEqual(self.us.check(job(location="")).reason, "no location given")
+        self.assertEqual(self.us.check(job(location="")).reason,
+                         "no location given, and no place named in the title or description")
+
+    def test_an_empty_location_is_read_from_the_title_then_the_description(self):
+        self.assertTrue(self.us.check(job(location="", description="Our office is in Austin, TX, United States.")).keep)
+        self.assertTrue(self.us.check(job("Software Engineer - Austin, TX", location="")).keep)
+        result = self.us.check(job(location="", description="Our office is in Berlin, Germany."))
+        self.assertFalse(result.keep)
+        self.assertTrue(result.reason.startswith("location outside allowed countries"), result.reason)
+
+    def test_an_empty_location_with_no_place_anywhere_asks_system_one(self):
+        class Model:
+            def __init__(self, p):
+                self.p, self.calls = p, []
+
+            def noul(self, name, state, question):
+                self.calls.append(name)
+                return self.p
+
+        for p, keep in ((0.9, True), (0.1, False)):
+            with self.subTest(p=p):
+                model = Model(p)
+                result = LocationFilter(LocationFilterSettings(["US"]), model=model).check(
+                    job(location="", description="A great team."))
+                self.assertEqual(model.calls, ["in_allowed_country"])
+                self.assertEqual(result.keep, keep)
 
     def test_other_built_in_and_custom_countries(self):
         ca = LocationFilter(LocationFilterSettings(["CA"]))
@@ -336,6 +361,77 @@ class TestRequiredYearsFromLabels(unittest.TestCase):
         f = SeniorityFilter(SeniorityFilterSettings(["entry", "mid"], 3))
         description = "Clients have been working with Genesis10 for 5-20+ years."
         self.assertTrue(f.check(job(title="Python AI Engineer", company="Genesis10", description=description)).keep)
+
+
+class TestRequiredYearsReviewRound(unittest.TestCase):
+    """Common requirement wording the parser missed, and company history it took for a requirement."""
+
+    def test_required_after_the_number(self):
+        self.assertEqual(required_years("5 years experience preferred; 2 years required"), 2)
+        self.assertEqual(required_years("3 years required."), 3)
+
+    def test_a_years_of_experience_label(self):
+        self.assertEqual(required_years("Years of experience: 4"), 4)
+        self.assertEqual(required_years("Minimum years of experience: 4+"), 4)
+        self.assertEqual(required_years("Years of relevant experience - 6"), 6)
+        self.assertIsNone(required_years("Preferred Qualifications:\nYears of experience: 4"))
+
+    def test_years_of_with_or_in_a_skill(self):
+        self.assertEqual(required_years("8+ years of Java"), 8)
+        self.assertEqual(required_years("- 7+ years with Go and Kubernetes"), 7)
+        self.assertEqual(required_years("10+ years in backend roles"), 10)
+        self.assertEqual(required_years("Qualifications:\n- 8+ years of Python"), 8)
+        self.assertEqual(required_years("- 5 years of Python"), 5)
+        self.assertEqual(required_years("Requirements:\n5 years with AWS"), 5)
+
+    def test_years_that_are_not_the_candidates_experience(self):
+        for text in ("Jane Doe is a Top Talent Award winner 12 years in a row",
+                     "The platform is the result of 7+ years of DARPA-funded R&D",
+                     "- Recognized 8 years in a row as a top employer",
+                     "Qualifications:\n- BS in CS\n- 401k matching after 5 years of service",
+                     "Requirements:\n- 5 years of Java (preferred)",
+                     "Requirements:\n- 5 years of Java, a plus",
+                     "Requirements:\n- Python\nBenefits\n- 5 years of tuition support",
+                     "Qualifications:\n- Python\nWhy Acme?\n- 6 years of profitable growth",
+                     "- 10+ years in a regulated industry is what our clients have",
+                     "Named a top place for engineering 8 years in a row"):
+            with self.subTest(text=text):
+                self.assertIsNone(required_years(text))
+
+    def test_skill_years_that_open_their_clause_still_count(self):
+        self.assertEqual(required_years("5+ years in applied computer vision"), 5)
+        self.assertEqual(required_years("10+ years in MLOps"), 10)
+        self.assertEqual(required_years("- 7+ years with Go and Kubernetes"), 7)
+        self.assertEqual(required_years("Must have 6 years of Java"), 6)
+        self.assertEqual(required_years("Qualifications:\n- At least 4 years with Go"), 4)
+
+    def test_requirements_missed_in_live_postings(self):
+        cases = {
+            "<ul><li>7+ years of managing partnerships with enterprise clients</li></ul>": 7,
+            "<p>Requirements:</p><ul><li>5 years&nbsp;of Python</li></ul>": 5,
+            "5+ years in a SaaS Account Executive role": 5,
+            "7+ years in an Ops, DevOps, or SRE role": 7,
+            "12+years in the highlighted skill set": 12,
+            "Qualifications - 5+ years in QA/SDET roles": 5,
+            "What You Bring - 5\u20138+ years building backend services": 5,
+            "Requirements: 6 years of Go": 6,
+        }
+        for text, years in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(required_years(text), years)
+
+    def test_html_years_that_are_not_requirements(self):
+        self.assertIsNone(required_years("<li>Named a top place to work 8 years in a row</li>"))
+        self.assertIsNone(required_years("<li>R&amp;D: 7+ years of the company&#39;s history</li>"))
+
+    def test_without_a_plus_bullet_or_section_a_skill_mention_is_not_a_requirement(self):
+        self.assertIsNone(required_years("Our platform has handled 5 years of Java upgrades."))
+
+    def test_company_history_anywhere_in_the_clause_is_not_a_requirement(self):
+        self.assertIsNone(required_years("The team has built software for 15 years."))
+        self.assertIsNone(required_years("Our company has 12+ years in fintech."))
+        self.assertIsNone(required_years("We have shipped software for 9 years."))
+        self.assertEqual(required_years("5+ years of software development at a top technology firm"), 5)
 
 
 class TestRequiredYearsFromBenchmark(unittest.TestCase):

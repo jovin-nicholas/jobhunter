@@ -283,7 +283,8 @@ class LayaScorer:
         alert_at, save_at = self.cutoffs()
         if alert_at is None:
             return "laya: alert checkpoint without cut-offs; it cannot judge jobs"
-        source = "overridden in jobhunter.yaml" if self.options.alert_at or self.options.save_at else "from the checkpoint"
+        overridden = self.options.alert_at is not None or self.options.save_at is not None
+        source = "overridden in jobhunter.yaml" if overridden else "from the checkpoint"
         return f"laya: alert at {alert_at:.0%} fit or higher, save for later from {save_at:.0%} ({source})"
 
     def _describe_questions(self) -> str:

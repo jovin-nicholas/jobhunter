@@ -70,3 +70,11 @@ def make_pdf(path: Path, lines: list[str]) -> None:
     out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
     out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
     Path(path).write_bytes(out)
+
+
+def status_counts(store) -> dict[str, int]:
+    """How many jobs the store holds in each status, read straight from its database."""
+    import sqlite3
+    from contextlib import closing
+    with closing(sqlite3.connect(store.path)) as conn:
+        return dict(conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status ORDER BY status"))

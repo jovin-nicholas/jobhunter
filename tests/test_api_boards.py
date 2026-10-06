@@ -147,6 +147,16 @@ class TestDover(unittest.TestCase):
         self.assertEqual(sorted(gone), ["dover_closed", "dover_off", "dover_priv"])
         self.assertTrue(any("err" in line and "503" in line for line in logs), logs)
 
+    def test_an_untitled_or_null_posting_is_logged_and_never_marked_gone(self):
+        gone, logs = [], []
+        http = Api({f"{DOVER}/inbound/application-portal-job/untitled": {"id": "untitled", "active": True},
+                    f"{DOVER}/inbound/application-portal-job/null": None})
+        urls = [f"https://app.dover.com/apply/moda/{i}" for i in ("untitled", "null")]
+        self.assertEqual(list(self.board(job_board=False).search(cx(http, urls, gone=gone, logs=logs))), [])
+        self.assertEqual(gone, [])
+        for job_id in ("untitled", "null"):
+            self.assertTrue(any(job_id in line for line in logs), logs)
+
     def test_an_unreadable_feed_is_logged_and_the_rest_runs(self):
         logs = []
         http = Api({PAGE(0): http_error(FEED, 500), f"{DOVER}/inbound/application-portal-job/a": dover_job("a")})
@@ -161,8 +171,9 @@ GEM = "https://jobs.gem.com/api/public/graphql"
 class GemSite:
     """`boards`: slug -> (team name, {extId: (hours ago, title)}); `broken`: extIds whose detail call answers 503."""
 
-    def __init__(self, boards, broken=()):
+    def __init__(self, boards, broken=(), locations=None):
         self.boards, self.broken = boards, set(broken)
+        self.locations = [{"name": "Remote"}, {"name": "New York, NY"}] if locations is None else locations
 
     def __call__(self, operation, v):
         if operation == "JobBoardList":
@@ -180,7 +191,7 @@ class GemSite:
         return {"data": {"oatsExternalJobPosting": {
             "id": f"g{v['extId']}", "extId": v["extId"], "title": title, "descriptionHtml": "<p>Make <b>it</b>.</p>",
             "firstPublishedTsSec": int((NOW - timedelta(hours=hours)).timestamp()),
-            "locations": [{"name": "Remote"}, {"name": "New York, NY"}], "job": {"teamDisplayName": team}}}}
+            "locations": self.locations, "job": {"teamDisplayName": team}}}}
 
 
 class GemApi(Api):
@@ -207,20 +218,29 @@ class TestGem(unittest.TestCase):
         self.assertEqual((j.title, j.company, j.location, j.url, j.source),
                          ("Backend", "Nominal", "Remote; New York, NY", f"https://jobs.gem.com/nominal/{ids[0]}", "gem"))
         self.assertEqual(j.description, "Make it.")
-        self.assertTrue(j.posted_at.startswith(str(NOW.year)))
+        posted = datetime.fromisoformat(j.posted_at)          # the date it was posted, read back
+        self.assertLess(abs(posted - (NOW - timedelta(hours=1))), timedelta(minutes=5))
 
     def test_known_postings_are_not_read_again(self):
         http = GemApi(post=GemSite({"nominal": ("Nominal", {"a": (1, "x")})}))
         self.assertEqual(list(self.board(companies=["nominal"]).search(cx(http, known={"gem_a"}))), [])
         self.assertEqual([c[0] for c in http.calls], ["JobBoardList"])
 
-    def test_a_discovered_posting_that_closed_is_gone(self):
-        gone = []
-        http = GemApi(post=GemSite({"goodbill": ("Goodbill", {"live": (1, "Full Stack")})}))
-        urls = ["https://jobs.gem.com/goodbill/live", "https://jobs.gem.com/goodbill/closed"]
-        jobs = list(self.board().search(cx(http, urls, gone=gone)))
+    def test_a_null_or_untitled_posting_is_logged_and_never_marked_gone(self):
+        gone, logs = [], []
+
+        class Odd(GemSite):
+            def __call__(self, operation, v):
+                if operation == "ExternalJobPosting" and v["extId"] == "untitled":
+                    return {"data": {"oatsExternalJobPosting": {"id": "g", "extId": "untitled"}}}
+                return super().__call__(operation, v)
+        http = GemApi(post=Odd({"goodbill": ("Goodbill", {"live": (1, "Full Stack")})}))
+        urls = [f"https://jobs.gem.com/goodbill/{i}" for i in ("live", "closed", "untitled")]
+        jobs = list(self.board().search(cx(http, urls, gone=gone, logs=logs)))
         self.assertEqual([j.id for j in jobs], ["gem_live"])
-        self.assertEqual(gone, ["gem_closed"])
+        self.assertEqual(gone, [])
+        for ext_id in ("closed", "untitled"):
+            self.assertTrue(any(ext_id in line for line in logs), logs)
 
     def test_an_empty_board_yields_nothing_quietly(self):
         logs = []
@@ -305,14 +325,18 @@ class TestAdp(unittest.TestCase):
                     adp_detail("1"): self.detail("1")})
         self.assertEqual([j.company for j in self.board(companies=[CID]).search(cx(http))], [CID])
 
-    def test_a_discovered_link_is_read_by_its_job_id_and_a_skeleton_is_gone(self):
-        gone = []
+    def test_a_discovered_link_is_read_by_its_job_id_and_only_a_404_is_gone(self):
+        gone, logs = [], []
         link = ("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
                 f"?cid={CID}&ccId=19000101_000001&jobId={{}}")
-        http = Api({adp_detail("708187"): self.detail("708187"), adp_detail("999"): {"customFieldGroup": {}}})
-        jobs = list(self.board().search(cx(http, [link.format("708187"), link.format("999")], gone=gone)))
+        http = Api({adp_detail("708187"): self.detail("708187"), adp_detail("999"): {"customFieldGroup": {}},
+                    adp_detail("998"): None})
+        urls = [link.format(i) for i in ("708187", "999", "998", "404")]
+        jobs = list(self.board().search(cx(http, urls, gone=gone, logs=logs)))
         self.assertEqual([j.id for j in jobs], [f"adp_{CID}_708187"])
-        self.assertEqual(gone, [f"adp_{CID}_999"])
+        self.assertEqual(gone, [f"adp_{CID}_404"])                  # a skeleton or null may be a hiccup: logged
+        for job_id in ("999", "998"):
+            self.assertTrue(any(job_id in line for line in logs), logs)
 
     def test_known_postings_get_no_detail_request(self):
         http = Api({adp_list(0): {"jobRequisitions": [adp_item("i1", "1")], "meta": {"totalNumber": 1}}})
@@ -363,6 +387,21 @@ class TestApiBoardEdges(unittest.TestCase):
         list(AdpBoard({"companies": [CID]}).search(cx(http, stale=stale)))
         self.assertEqual(len(stale), 21)
 
+
+    def test_an_unknown_location_is_left_empty_not_called_remote(self):
+        from jobhunter.boards.adp import AdpBoard
+        from jobhunter.boards.dover import DoverBoard
+        from jobhunter.boards.gem import GemBoard
+        dover = Api({PAGE(0): {"next": None, "results": [feed_item("a")]},
+                     f"{DOVER}/inbound/application-portal-job/a": dover_job("a", locations=[])})
+        gem = GemApi(post=GemSite({"nominal": ("Nominal", {"a": (1, "A")})}, locations=[]))
+        adp = Api({adp_list(0): {"jobRequisitions": [adp_item("i1", "1")], "meta": {"totalNumber": 1}},
+                   adp_detail("1"): {**adp_item("x", "1"), "requisitionLocations": [], "requisitionDescription": "x"}})
+        for name, jobs in (("dover", DoverBoard({"discover": False}).search(cx(dover))),
+                           ("gem", GemBoard({"companies": ["nominal"]}).search(cx(gem))),
+                           ("adp", AdpBoard({"companies": [CID]}).search(cx(adp)))):
+            with self.subTest(board=name):
+                self.assertEqual([j.location for j in jobs], [""])
 
 
 if __name__ == "__main__":

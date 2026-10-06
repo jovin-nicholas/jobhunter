@@ -1,4 +1,6 @@
 import json
+import shutil
+import tempfile
 import unittest
 import unittest.mock
 from contextlib import asynccontextmanager
@@ -32,7 +34,7 @@ class FakeSession:
 
 def factory(session):
     @asynccontextmanager
-    async def open_session(npx_option):
+    async def open_session(npx_option, cwd):
         yield session
     return open_session
 
@@ -82,6 +84,53 @@ class TestLinkedInBoard(unittest.TestCase):
 
     def test_constructing_the_board_does_not_need_npx(self):
         LinkedInBoard({"npx": "/nonexistent/npx"})
+
+    def test_the_server_is_pinned_and_runs_outside_the_repo(self):
+        from pathlib import Path
+
+        from jobhunter.boards.linkedin import MCP_PACKAGE, server_params
+        self.assertRegex(MCP_PACKAGE, r"^linkedin-jobs-mcp@\d+\.\d+\.\d+$")
+        params = server_params("/usr/local/bin/npx")
+        self.addCleanup(shutil.rmtree, params.cwd, True)
+        self.assertEqual((params.command, params.args), ("/usr/local/bin/npx", ["-y", MCP_PACKAGE]))
+        repo = Path(__file__).resolve().parent.parent
+        self.assertFalse(Path(params.cwd).resolve().is_relative_to(repo))
+        self.assertNotEqual(Path(params.cwd).resolve(), Path(tempfile.gettempdir()).resolve())
+        self.assertEqual(Path(params.cwd).stat().st_mode & 0o777, 0o700)
+
+    def test_without_a_data_folder_one_private_folder_serves_the_whole_process(self):
+        from jobhunter.boards.linkedin import private_dir
+        first = private_dir(None)
+        self.addCleanup(shutil.rmtree, first, True)
+        self.assertEqual(private_dir(None), first)
+        self.assertEqual(first.stat().st_mode & 0o777, 0o700)
+
+    def test_npx_runs_in_a_private_folder_in_the_data_folder(self):
+        from pathlib import Path
+
+        from jobhunter.boards.linkedin import private_dir
+        data = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, data, True)
+        folder = private_dir(data)
+        self.assertEqual(folder, data / "npx")
+        self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+        folder.chmod(0o755)
+        self.assertEqual(private_dir(data).stat().st_mode & 0o777, 0o700)      # tightened again on the next run
+
+    def test_the_session_is_opened_in_the_private_folder(self):
+        from pathlib import Path
+        seen = []
+
+        @asynccontextmanager
+        async def open_session(npx_option, cwd):
+            seen.append(cwd)
+            yield FakeSession([])
+        data = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, data, True)
+        c = ctx(queries=())
+        c.data_dir = data
+        LinkedInBoard({"delay_s": 0}, session_factory=open_session).search(c)
+        self.assertEqual(seen, [data / "npx"])
 
     def test_find_npx(self):
         self.assertEqual(find_npx("~/bin/npx").endswith("/bin/npx"), True)

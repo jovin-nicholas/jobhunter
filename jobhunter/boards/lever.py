@@ -7,7 +7,7 @@ from typing import Iterator
 from urllib.parse import urlparse
 
 from jobhunter.boards.ats_urls import discovered
-from jobhunter.boards.common import cutoff, each_listing, is_fresh, is_gone
+from jobhunter.boards.common import cutoff, each_listing, is_fresh, is_gone, parse_time
 from jobhunter.models import Job, SearchContext
 from jobhunter.registry import board
 from jobhunter.text_clean import html_to_text
@@ -27,10 +27,16 @@ def _description(raw: dict) -> str:
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
+def _iso(created) -> str:
+    """Lever's createdAt (milliseconds since 1970) as ISO text, like the other boards store; "" when unreadable."""
+    when = parse_time(created)
+    return when.isoformat() if when else ""
+
+
 def to_job(raw: dict, slug: str) -> Job:
     return Job(id=f"lever_{raw.get('id', '')}", title=raw.get("text", ""), company=slug,
                location=(raw.get("categories") or {}).get("location") or "", url=raw.get("hostedUrl", ""),
-               posted_at=str(raw.get("createdAt", "")), description=_description(raw), source="lever", ats="lever",
+               posted_at=_iso(raw.get("createdAt")), description=_description(raw), source="lever", ats="lever",
                description_is_snippet=False)
 
 

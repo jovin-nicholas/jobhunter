@@ -26,8 +26,10 @@ class VcBoardsBoard:
 
     def __init__(self, options: dict):
         self.options = self.Options(**options)
+        self.problem: str | None = None   # a VC source this run could not read, shown in the run summary
 
     def search(self, ctx: SearchContext) -> Iterator[Job]:
+        self.problem = None
         listings = ctx.discovery.listings() if ctx.discovery is not None and hasattr(ctx.discovery, "listings") else []
         discovering = ATS_BOARDS if getattr(ctx, "discovering", None) is None else ctx.discovering
         keys, urls, handed, kept = set(), set(), Counter(), 0
@@ -45,9 +47,10 @@ class VcBoardsBoard:
             kept += 1                            # an ATS board that is off or not discovering would lose it
             if ctx.is_known(l.key):
                 continue
-            yield Job(id=l.key, title=l.title, company=l.company, location=l.location or "Remote", url=l.url,
+            yield Job(id=l.key, title=l.title, company=l.company, location=l.location or "", url=l.url,
                       posted_at=l.posted_at, description="", source="vc_boards",
                       ats=ats if ats in ATS_BOARDS else "")
+        self.problem = "; ".join(getattr(ctx.discovery, "failures", None) or []) or None
         if listings:
             by_board = ", ".join(f"{name} {n}" for name, n in sorted(handed.items()))
             ctx.log(f"vc_boards: {sum(handed.values())} link(s) handed to ATS boards"

@@ -104,6 +104,15 @@ class TestCompare(unittest.TestCase):
         self.assertEqual([(d["old_score"], d["new_score"]) for d in c.disagreements], [(6, "fit 72%")])
         self.assertIn("(scores 6 / fit 72%)", report(c))
 
+    def test_compare_shows_a_questions_score_as_its_label(self):
+        tmp = Path(tempfile.mkdtemp())
+        old_db(tmp / "old.db", [("a", "A", "X", "logged", 6)])
+        store = Store(tmp / "new.db")
+        store.save(job("a"), "notified", ScoreResult(score=6.4231, model="laya", decision="notify", probability=0.6,
+                                                     label="fit 6.42/10"))
+        c = compare(tmp / "old.db", store.path)
+        self.assertEqual([(d["old_score"], d["new_score"]) for d in c.disagreements], [(6, "fit 6.42/10")])
+
 
 class TestMigrationCli(unittest.TestCase):
     def test_import_and_compare_commands(self):

@@ -59,7 +59,8 @@ class TestGetro(unittest.TestCase):
         l = found[0]
         self.assertEqual((l.source, l.title, l.company, l.location, l.url),
                          ("Redpoint", "Engineer 1", "Co1", "New York, NY; Remote", "https://jobs.ashbyhq.com/co1/1"))
-        self.assertTrue(l.posted_at.startswith(str(NOW.year)))
+        posted = datetime.fromisoformat(l.posted_at)          # the date it was posted, read back
+        self.assertLess(abs(posted - (NOW - timedelta(hours=1))), timedelta(minutes=5))
 
     def test_a_page_of_cached_jobs_stops_paging_and_featured_jobs_do_not_count(self):
         http = Http(pages([gjob(9, 500, featured=True), gjob(1, 1), gjob(2, 2)], [gjob(3, 3)]))
@@ -155,6 +156,14 @@ class TestConsider(unittest.TestCase):
         logs = []
         self.assertEqual(consider_listings(Http(lambda m, u, kw: Resp(text="<html></html>")), self.CFG, CUT, logs.append), [])
         self.assertTrue(any("no job list found" in line for line in logs), logs)
+
+    def test_a_page_without_a_job_list_is_recorded_as_a_failure(self):
+        failures = []
+        consider_listings(Http(lambda m, u, kw: Resp(text="<html></html>")), self.CFG, CUT, lambda line: None,
+                          failures=failures)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("jobs.a16z.com", failures[0])
+        self.assertIn("page format", failures[0])
 
 
 if __name__ == "__main__":

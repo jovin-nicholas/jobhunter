@@ -4,8 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-DECISIONS = ("notify", "log", "skip")
-
 
 @dataclass
 class Job:
@@ -99,3 +97,5 @@ class SearchContext:
     # The ATS boards that read discovered links this run (enabled, picked by --only, discover on); None: not known,
     # taken as every ATS board.
     discovering: frozenset[str] | set[str] | None = None
+    # The run's data folder (settings.data_dir), for a board that needs a private working folder; None: not known.
+    data_dir: Any = None

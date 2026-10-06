@@ -1,8 +1,10 @@
 """Fine-tune Laya for jobhunter. Two methods share this module:
-- alert: one yes/no question (docs/specs/2026-10-04-laya-alert-finetune-design.md);
-- questions: stack role, dealbreaker and fit, combined by gates and fitted cut-offs
-  (docs/specs/2026-10-05-laya-questions-finetune-design.md).
-Every step is a function, so the notebooks only call them and the logic is tested on a laptop."""
+- questions (train_questions.ipynb, the one to use): stack role, dealbreaker and fit, combined by gates and fitted
+  cut-offs;
+- alert (train_alert.ipynb, the older checkpoint): one yes/no question, is this job worth an alert?
+Both train on pools of your own labelled jobs (read_pool says which fields a row needs) and a plain-text resume.
+`jobhunter export-feedback` writes a record of your verdicts, not a pool; turning verdicts into pools is a manual step
+today. Every step is a function, so the notebooks only call them and the logic is tested on a laptop."""
 from __future__ import annotations
 
 import json
@@ -631,7 +633,6 @@ def load_base(base_dir: str, device):
     """Laya's model and tokenizer from a checkpoint folder (the base download, or a fine-tuned one)."""
     import os
 
-    import torch
     from laya.agent import _fix_tokenizer_config, _load_tokenizer
     from laya.common import build_model
     from safetensors.torch import load_file
@@ -1169,9 +1170,10 @@ def load_question_base(device, log=print, download=download_base, load=load_base
     return model, tok, cfg, base, f"root laya (fallback: {BASE_SUBFOLDER} not found ({why}))"
 
 
-# ---- The offline benchmark harness's arithmetic ------------------------------------------------------------------
-
-BASELINE = {"alerts": 43, "caught": 18, "good": 35}      # today's live hybrid on the benchmark 500: 41.9%, 18 of 35
+# ---- Arithmetic for an offline benchmark of your own ----------------------------------------------------------------
+# Not used by training or by jobhunter: for comparing a new checkpoint's alerts with what you run today, on jobs you
+# have labelled yourself. The baseline is yours to measure: {"alerts": N, "caught": K, "good": G}, alert_summary's
+# fields for the setup you run now.
 
 
 def alert_summary(decisions: dict[str, str], labels: dict[str, str], keep: set[str] | None = None) -> dict:
@@ -1186,7 +1188,7 @@ def alert_summary(decisions: dict[str, str], labels: dict[str, str], keep: set[s
             "caught": k, "good": sum(v == "notify" for v in labels.values())}
 
 
-def go_no_go(hybrid: dict, baseline: dict = BASELINE) -> bool:
-    """GO only if, inside the hybrid, more alerts are worth opening than the live baseline's without catching fewer
-    good jobs."""
+def go_no_go(hybrid: dict, baseline: dict) -> bool:
+    """GO only if, inside the hybrid, more alerts are worth opening than the baseline's (your current setup on the
+    same labelled jobs, {"alerts": N, "caught": K}) without catching fewer good jobs."""
     return hybrid["worth"] > baseline["caught"] / baseline["alerts"] and hybrid["caught"] >= baseline["caught"]

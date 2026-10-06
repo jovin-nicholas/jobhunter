@@ -92,6 +92,26 @@ class TestGreenhouseDiscover(unittest.TestCase):
         self.assertEqual(http.calls, [])
 
 
+class TestGreenhouseDates(unittest.TestCase):
+    def test_an_edited_old_posting_is_stale_by_its_first_published_date(self):
+        old = gh(1, 1, first_published=iso(500))                     # edited an hour ago, first published 3 weeks ago
+        http = Routes({"https://boards-api.greenhouse.io/v1/boards/acme/jobs": {"jobs": [old, gh(2, 1)]},
+                       GH.format("acme", 3): gh(3, 1, first_published=iso(500))})
+        stale = []
+        jobs = list(GreenhouseBoard({"companies": ["acme"], "discover": True})
+                    .search(ctx(http, ["https://boards.greenhouse.io/acme/jobs/3"], stale=stale)))
+        self.assertEqual([j.id for j in jobs], ["greenhouse_2"])
+        self.assertEqual(stale, ["greenhouse_3"])
+
+    def test_the_stored_date_is_the_first_published_one(self):
+        from jobhunter.boards.greenhouse import published_at
+        self.assertEqual(to_job(gh(1, 1, first_published=iso(5)), "acme").posted_at, iso(5))
+        self.assertEqual(published_at({"updated_at": "u", "created_at": "c"}), "c")
+        self.assertEqual(published_at({"updated_at": "u", "posted_at": "p"}), "p")
+        self.assertEqual(published_at({"updated_at": "u"}), "u")
+        self.assertIsNone(published_at({}))
+
+
 LEVER_ID = "0f7a8c2e-1111-2222-3333-444455556666"
 
 
@@ -109,6 +129,12 @@ class TestLever(unittest.TestCase):
         self.assertEqual([j.id for j in jobs], ["lever_a"])
         self.assertEqual(jobs[0].description, "Build services.\n\nRequirements\nJava\nSQL\n\nBenefits.")
         self.assertEqual((jobs[0].company, jobs[0].location, jobs[0].ats), ("beta", "Remote - US", "lever"))
+
+    def test_the_posted_date_is_stored_as_iso_text(self):
+        http = Routes({"https://api.lever.co/v0/postings/beta": [lever("a", 1)]})
+        job = next(iter(LeverBoard({"companies": ["beta"]}).search(ctx(http))))
+        posted = datetime.fromisoformat(job.posted_at)
+        self.assertLess(abs(posted - (NOW - timedelta(hours=1))), timedelta(seconds=1))
 
     def test_discovered_detail_including_the_wrapped_form(self):
         http = Routes({f"https://api.lever.co/v0/postings/beta/{LEVER_ID}": {"postings": [lever(LEVER_ID, 1)]}})

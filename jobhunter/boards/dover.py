@@ -78,8 +78,11 @@ class DoverBoard:
                 else:
                     ctx.log(f"dover [{company_hint}/{job_id}]: failed: {e}")
                 return None
-            if not isinstance(raw, dict) or not raw.get("title") or raw.get("active") is False or raw.get("is_private"):
-                ctx.mark_gone(key)
+            if isinstance(raw, dict) and (raw.get("active") is False or raw.get("is_private")):
+                ctx.mark_gone(key)                   # Dover's own flags: closed or hidden for good
+                return None
+            if not isinstance(raw, dict) or not raw.get("title"):
+                ctx.log(f"dover [{company_hint}/{job_id}]: unexpected answer without a title; tried again next run")
                 return None
             if not is_fresh(raw.get("created"), limit):
                 ctx.mark_stale(key)
@@ -87,7 +90,7 @@ class DoverBoard:
             company = (raw.get("client_name") or company_hint or "").strip()
             where = "; ".join(loc["name"] for loc in raw.get("locations") or []
                               if isinstance(loc, dict) and loc.get("name"))
-            return Job(id=key, title=str(raw["title"]).strip(), company=company, location=where or "Remote",
+            return Job(id=key, title=str(raw["title"]).strip(), company=company, location=where,
                        url=apply_url(company, job_id), posted_at=str(raw.get("created") or ""),
                        description=html_to_text(raw.get("user_provided_description") or ""),
                        source="dover", ats="dover", description_is_snippet=False)

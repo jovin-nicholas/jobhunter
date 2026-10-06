@@ -5,6 +5,7 @@ import threading
 import time
 from collections import Counter
 from dataclasses import dataclass, field, fields
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -21,7 +22,7 @@ from jobhunter.registry import Registry, build_registry, check_names
 from jobhunter.resumes import ResumeSet, load_resumes
 from jobhunter.scorers.chain import ScorerChain
 from jobhunter.settings import Settings, load_settings
-from jobhunter.store import STATUS_FOR_DECISION
+from jobhunter.store import RETRY_HOURS, STATUS_FOR_DECISION
 
 Log = Callable[[str], None]
 _REPAIRED = {"title", "company", "location", "description"}
@@ -57,6 +58,7 @@ class BoardSummary:
     duplicates: int = 0               # would have been notified, but the same job already was
     no_description: int = 0           # of `retry`: the posting page gave no description (boards that need one)
     failed: str | None = None         # why the board's search produced nothing
+    problem: str | None = None        # what went wrong in a search that still produced jobs (board.problem)
     skipped_reason: str | None = None  # the board cannot run here (e.g. LinkedIn without Node.js)
 
 
@@ -147,7 +149,8 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
                         is_known=store.is_terminal,
                         mark_stale=(lambda job_id: None) if dry_run else store.mark_stale,
                         mark_gone=(lambda job_id: None) if dry_run else store.mark_gone,
-                        discovering=frozenset(name for name, b in boards.items() if _discovers(name, b)))
+                        discovering=frozenset(name for name, b in boards.items() if _discovers(name, b)),
+                        data_dir=app.settings.data_dir)
     if not s.fetch_descriptions:
         fetch_page = None
     elif fetch_page is None:
@@ -184,7 +187,8 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
             f"found {c.found}, new {c.new}, notified {c.notified}, duplicates {c.duplicates}, logged {c.logged}, "
             f"skipped {c.skipped}, "
             f"filtered {sum(c.filtered.values())} {dict(c.filtered) or ''}, retry {c.retry}, errors {c.errors}"
-            + (f", no description {c.no_description}" if c.no_description else ""))
+            + (f", no description {c.no_description}" if c.no_description else "")
+            + (f"; PROBLEM: {c.problem}" if c.problem else ""))
         log(f"[{name}] {detail}".rstrip())
     notes = {f.report() for f in app.filters if callable(getattr(f, "report", None))} - {None}
     for note in sorted(notes):
@@ -240,6 +244,7 @@ def _search_all(app: App, boards: dict[str, Any], ctx: SearchContext, summary: d
             summary[name].failed = results
             log(f"[{name}] search failed: {results}")
             continue
+        summary[name].problem = getattr(boards[name], "problem", None) or None
         for job in results:
             try:
                 _clean(job)
@@ -314,14 +319,23 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
 
     resume = app.resumes.pick(job)
     outcome = app.chain.score(job, resume)
+    for note in outcome.notes:
+        log(note)
     if outcome.result is None:
-        if outcome.status in ("error_429_retry", "error_unavailable"):
+        status = outcome.status
+        if status == "error_scorer":
+            # Every scorer failed on this job: on the retry list for RETRY_HOURS from when it was first saved. Listed
+            # again by a board after that and still failing, it is final; not listed again, it stays error_scorer.
+            first = store.first_saved_at(job.id)
+            if first is not None and datetime.now(timezone.utc) - first >= timedelta(hours=RETRY_HOURS):
+                status = "error_terminal"
+        if status in ("error_429_retry", "error_unavailable"):
             counts.retry += 1
         else:
             counts.errors += 1
-        log(f"{outcome.status.upper()} [{job.source}] {job.title} at {job.company}: {'; '.join(outcome.errors)}")
+        log(f"{status.upper()} [{job.source}] {job.title} at {job.company}: {'; '.join(outcome.errors)}")
         if not dry_run:
-            store.save(job, outcome.status, resume_id=resume.id)
+            store.save(job, status, resume_id=resume.id)
         return
 
     for failure in outcome.first_failures:

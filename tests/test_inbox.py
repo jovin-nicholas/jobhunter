@@ -13,8 +13,9 @@ SETTINGS = NotifySettings(email={"from_env": "GMAIL_ADDRESS", "password_env": "G
 ENCODED = "=?UTF-8?B?amg6Z29vZDpkaWNlXzE=?="         # jh:good:dice_1, as a phone mail app may write it
 
 
-def header(frm, subject, mid="<m1@x>", date="Mon, 05 Oct 2026 10:00:00 +0000"):
-    lines = [f"From: {frm}", f"Subject: {subject}"]
+def header(frm, subject, mid="<m1@x>", date="Mon, 05 Oct 2026 10:00:00 +0000", auth=None):
+    lines = [f"Authentication-Results: {a}" for a in ([auth] if isinstance(auth, str) else auth or [])]
+    lines += [f"From: {frm}", f"Subject: {subject}"]
     lines += [f"Message-ID: {mid}"] if mid else []
     lines += [f"Date: {date}"] if date else []
     return ("\r\n".join(lines) + "\r\n\r\n").encode()
@@ -83,6 +84,10 @@ class InboxTestCase(unittest.TestCase):
     def read(self, imap):
         return read_feedback(SETTINGS, ENV, self.store, log=self.logs.append, imap_factory=lambda *a, **k: imap)
 
+    def problems(self):
+        """The log without the note about messages Gmail added no Authentication-Results to (these fakes have none)."""
+        return [line for line in self.logs if "Authentication-Results" not in line]
+
 
 class TestReadFeedback(InboxTestCase):
     def test_saves_valid_and_labels_everything_matched(self):
@@ -100,7 +105,7 @@ class TestReadFeedback(InboxTestCase):
         self.assertEqual([s[1] for s in imap.stored], ["+X-GM-LABELS", "-X-GM-LABELS"])
         self.assertEqual(imap.stored[0][2], '("jobhunter/feedback")')
         self.assertEqual(summary.line(), "feedback: 2 saved (1 bad, 1 good), 3 ignored")
-        self.assertEqual(self.logs, [])
+        self.assertEqual(self.problems(), [])
 
     def test_labels_only_after_saving(self):
         imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1")})
@@ -174,7 +179,7 @@ class TestImapReplies(InboxTestCase):
         imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1")}, no_on="store +X-GM-LABELS")
         summary = self.read(imap)
         self.assertEqual(dict(summary.saved), {"good": 1})
-        self.assertEqual(self.logs, ["feedback: could not label the messages (NO: [CANNOT] Command failed)"])
+        self.assertEqual(self.problems(), ["feedback: could not label the messages (NO: [CANNOT] Command failed)"])
 
     def test_a_rejected_login_says_why_without_the_password(self):
         import imaplib
@@ -207,6 +212,54 @@ class TestFetchAndSenders(InboxTestCase):
                          "12": header("phone@example.com", "jh:bad:dice_1", mid="<m2@x>")})
         summary = read_feedback(SETTINGS, env, self.store, log=self.logs.append, imap_factory=lambda *a, **k: imap)
         self.assertEqual(dict(summary.saved), {"good": 1, "bad": 1})
+
+
+class TestAuthenticationResults(InboxTestCase):
+    PASS_DKIM = "mx.google.com; dkim=pass header.i=@example.com header.s=s1; spf=neutral smtp.mailfrom=x@other.example"
+    PASS_SPF = "mx.google.com; dkim=none; spf=pass (google.com: domain of sender@example.com designates 1.2.3.4) " \
+               "smtp.mailfrom=sender@example.com"
+    FAIL = "mx.google.com; dkim=fail header.i=@example.com; spf=softfail smtp.mailfrom=sender@example.com"
+    OTHER_DOMAIN = "mx.google.com; dkim=pass header.i=@attacker.example; spf=pass smtp.mailfrom=a@attacker.example"
+
+    def test_a_message_gmail_authenticated_is_saved(self):
+        imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1", auth=self.PASS_DKIM),
+                         "12": header("john.doe@example.com", "jh:bad:dice_1", mid="<m2@x>", auth=self.PASS_SPF)})
+        self.assertEqual(dict(self.read(imap).saved), {"good": 1, "bad": 1})
+        self.assertEqual(self.logs, [])
+
+    def test_a_message_that_failed_authentication_is_ignored(self):
+        imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1", auth=self.FAIL),
+                         "12": header("sender@example.com", "jh:bad:dice_1", mid="<m2@x>", auth=self.OTHER_DOMAIN)})
+        summary = self.read(imap)
+        self.assertEqual(dict(summary.saved), {})
+        self.assertEqual(dict(summary.ignored), {"not authenticated": 2})
+        self.assertIn("jobhunter/feedback", [s[2] for s in imap.stored][0])     # still labelled, not read again
+
+    def test_a_subdomain_or_a_dmarc_pass_counts(self):
+        sub = "mx.google.com; dkim=pass header.i=@mail.example.com; spf=none"
+        dmarc = "mx.google.com; dkim=none; spf=none; dmarc=pass (p=NONE) header.from=example.com"
+        lookalike = "mx.google.com; dkim=pass header.i=@notexample.com; dmarc=pass header.from=badexample.com"
+        imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1", auth=sub),
+                         "12": header("sender@example.com", "jh:bad:dice_1", mid="<m2@x>", auth=dmarc),
+                         "13": header("sender@example.com", "jh:bad:dice_1", mid="<m3@x>", auth=lookalike)})
+        summary = self.read(imap)
+        self.assertEqual(dict(summary.saved), {"good": 1, "bad": 1})
+        self.assertEqual(dict(summary.ignored), {"not authenticated": 1})
+        self.assertEqual([l for l in self.logs if "failed" in l],
+                         ["feedback: 1 message(s) from your address failed Gmail's DKIM, SPF and DMARC checks; ignored"])
+
+    def test_only_gmails_own_header_counts(self):
+        forged = "mx.attacker.example; dkim=pass header.i=@example.com"
+        imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1", auth=[self.FAIL, forged])})
+        self.assertEqual(dict(self.read(imap).ignored), {"not authenticated": 1})
+
+    def test_without_the_header_the_from_address_decides_and_it_is_logged_once(self):
+        imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1"),
+                         "12": header("sender@example.com", "jh:bad:dice_1", mid="<m2@x>")})
+        self.assertEqual(dict(self.read(imap).saved), {"good": 1, "bad": 1})
+        notes = [line for line in self.logs if "Authentication-Results" in line]
+        self.assertEqual(len(notes), 1, self.logs)
+        self.assertIn("2 message(s)", notes[0])
 
 
 

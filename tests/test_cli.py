@@ -142,6 +142,18 @@ class TestFeedbackCommands(unittest.TestCase):
             "dice_1,Backend Engineer,Acme,log,maybe,2026-10-05T10:00:00+00:00"])
         self.assertIn("wrote 1 verdict", stdout)
 
+    def test_export_feedback_writes_to_the_data_folder_by_default(self):
+        code, stdout, _ = cli("--settings", str(self.path), "export-feedback")
+        self.assertEqual(code, 0)
+        out = self.tmp / "data" / "feedback_labels.csv"
+        self.assertTrue(out.exists())
+        self.assertIn(str(out), stdout)
+
+    def test_the_gitignore_covers_personal_training_files(self):
+        lines = (ROOT / ".gitignore").read_text().splitlines()
+        for pattern in ("feedback_labels.csv", "/scoring_resume.txt", "pool_*.jsonl", "heldout_ids.txt", "upload_*/"):
+            self.assertIn(pattern, lines)
+
     def test_export_feedback_rejects_a_bad_date(self):
         code, _, err = cli("--settings", str(self.path), "export-feedback", "--since", "yesterday")
         self.assertEqual(code, 2)

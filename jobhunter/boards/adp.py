@@ -67,13 +67,14 @@ class AdpBoard:
                     ctx.log(f"adp [{cid}/{job_id}]: failed: {e}")
                 return None
             if not isinstance(raw, dict) or not raw.get("requisitionTitle"):
-                ctx.mark_gone(key)                   # ADP answers a closed posting with an empty record
+                # An empty record may be a closed posting or a hiccup: only a 404/410 is gone for good.
+                ctx.log(f"adp [{cid}/{job_id}]: unexpected answer without a title; tried again next run")
                 return None
             if not is_fresh(raw.get("postDate"), limit):
                 ctx.mark_stale(key)
                 return None
             return Job(id=key, title=str(raw["requisitionTitle"]).strip(), company=names.get(cid, cid),
-                       location=locations(raw) or "Remote", url=posting_url(cid, job_id),
+                       location=locations(raw), url=posting_url(cid, job_id),
                        posted_at=str(raw.get("postDate") or ""),
                        description=html_to_text(raw.get("requisitionDescription") or ""),
                        source="adp", ats="adp", description_is_snippet=False)

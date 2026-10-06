@@ -56,9 +56,9 @@ loads the model, about 5 s).
 - `laya.model` is a Hugging Face id such as `convaiinnovations/laya`, downloaded on the first run, or the folder of a
   Laya you fine-tuned on your own job decisions (`~/models/laya_finetuned`).
 - A local folder's `rl_agent_config.json` says how its decisions were trained (`question`, `from_score`, `alert` or
-  `questions`)
-  and at which thresholds; jobhunter reads both. For a Hugging Face id the defaults are used (`question`, notify at
-  7, log at 5).
+  `questions`). The two older methods give a 1-10 score and `decisions:` in `jobhunter.yaml` decides from it; for
+  `from_score` the checkpoint's `score_thresholds` only choose how its answer is turned into that score. A Hugging
+  Face id uses the `question` method.
 - An alert checkpoint is fine-tuned on a single yes/no question (is this job worth an alert?) instead of a 1-10
   score; it decides alert, save for later or skip itself, from its own `alert_at` / `save_at` cut-offs (see
   `docs/settings.md`).
@@ -76,11 +76,17 @@ loads the model, about 5 s).
 - A job whose description could not be downloaded (the site refused or timed out) is not scored from its title; it
   is saved as `error_unavailable` and tried again on the next run.
 - Fine-tuning your own checkpoint: [training/](training/) holds `laya_train.py` and two Colab notebooks, with
-  dependencies in `requirements-train.txt`. `train_questions.ipynb` trains a questions checkpoint (stack role,
-  dealbreaker and fit) on your own labelled jobs: upload the six files it lists, run the cells on a GPU, read the
-  report it prints, then download the single zip it writes and check it with `shasum -a 256 -c SHA256SUMS`. If Colab
-  disconnects, rerun the setup and data cells and the restore cell picks up the best saved epoch. Point `laya.model`
-  at the unzipped folder. `train_alert.ipynb` trains the older single-question alert checkpoint.
+  dependencies in `requirements-train.txt` (which includes `requirements-laya.txt`). Use `train_questions.ipynb`: it
+  trains a questions checkpoint (stack role, dealbreaker and fit); `train_alert.ipynb` trains the older
+  single-question alert checkpoint. Both ask for six files: `laya_train.py`, `jobhunter/posting.py`, your resume as
+  `scoring_resume.txt`, two pools of your own labelled jobs (`pool_old.jsonl`, `pool_jobhunter.jsonl`) and
+  `heldout_ids.txt` (job ids kept out of training). A pool is JSON lines with `job_id`, `title`, `company`,
+  `description`, `label` (notify, log or skip) and optionally `location`; the questions method also needs
+  `match_score` (1-10), `stack_role` and `dealbreaker` (text or null) on every row. `export-feedback`'s CSV is a
+  record of your verdicts, not a pool: building pools from it is a manual step today. Run the cells on a GPU, read
+  the report it prints, then download the single zip it writes and check it with `shasum -a 256 -c SHA256SUMS`. If
+  Colab disconnects, rerun the setup and data cells and the restore cell picks up the best saved epoch. Point
+  `laya.model` at the unzipped folder.
 
 ## Ollama: choosing a local model
 
@@ -146,9 +152,12 @@ description for it, before any model runs:
     hourly_internships: keep      # or exclude
 ```
 
-Contract wording includes "contractor", "C2C", "1099", "W2 only" / "only W2", "6-month contract" and "employment
-type: contract"; hourly means a stated rate such as "$55/hr" or "$50-60 per hour" (not "the salary or hourly rate
-offered"). A skipped job is saved as `filtered` with the matched words as its reason, e.g. "contract: c2c". Details
+Contract wording includes "contract", "contractor", "temporary" or "freelance" in the title, and "contractor role",
+"independent contractor", "C2C", "1099 contract" / "1099 only" / "on 1099", "W2 only" / "only W2", "6-month contract"
+and "employment type: contract" anywhere; a bare "1099" ("Form 1099 processing") and "smart contract" never count.
+Hourly means a rate in dollars such as "$55/hr", "$50-60 per hour" or "USD 40 per hour" (not "the salary or hourly
+rate offered", and not a number without a currency in the description, such as "10,000/hr transactions"; in the
+title "65/hr" is enough). A skipped job is saved as `filtered` with the matched words as its reason, e.g. "contract: c2c". Details
 are in [docs/settings.md](docs/settings.md).
 
 ## Boards
@@ -163,7 +172,8 @@ it runs with `discover` on, and every other link, including an ATS link whose bo
 by `--only`, comes from `vc_boards`. An explicit `boards:` list must include `vc_boards` to get these jobs.
 
 - **linkedin** searches through the `linkedin-jobs-mcp` server, which needs Node.js (`npx`; the first run downloads
-  it). Without Node.js the board is skipped with a note. Descriptions come from LinkedIn's public job-posting pages,
+  it). The version is pinned (`MCP_PACKAGE` in `jobhunter/boards/linkedin.py`) and the server runs in `data/npx`, a
+  folder only you can read (mode 700), not the repo folder. Without Node.js the board is skipped with a note. Descriptions come from LinkedIn's public job-posting pages,
   one request every 3 seconds.
 - Requests are spaced per site; rate limits and server errors are retried with growing waits (or the site's
   `Retry-After`, up to 60 s), and a site that answers 429 is slowed down for every board.
@@ -205,15 +215,18 @@ that also has `generate(prompt) -> str` can write cover letters.
 | `list-boards`, `list-scorers` | Built-in and plugin boards and scorers, and where each comes from |
 | `import-db PATH` | Copy jobs from a job-notifier database so none is scored or notified again |
 | `compare-db PATH [--since YYYY-MM-DD]` | For jobs both apps decided: how often they agree, and where they differ |
-| `export-feedback [--out FILE] [--since YYYY-MM-DD]` | Write the verdicts from alert buttons as training labels (`job_id,job_title,company,decision,verdict,received_at`) |
+| `export-feedback [--out FILE] [--since YYYY-MM-DD]` | Write each job's latest verdict from the alert buttons to a CSV (default `data/feedback_labels.csv`; columns `job_id,job_title,company,decision,verdict,received_at`) |
 | `send-test-alert` | Email yourself an alert for the last notified job, to try the feedback buttons |
 
 Each job is saved in `data/jobs.db` with a status: `notified`, `logged` or `skipped` (the score against
 `decisions`), `filtered` (with the filter's reason), `stale` or `gone` (a discovered posting too old, or no longer
 there), `duplicate` (would have been notified, but the same job was already notified in the last 30 days or earlier in
-the run), `error_429_retry` (scored again when a board lists it again), `error_unavailable` / `error_notify` (tried again on
-later runs for up to 24 hours after first being saved; `error_notify` means no Slack or email channel delivered the
-alert), or `error_terminal` (no scorer could read its answer for this job; not retried).
+the run), `error_429_retry` (scored again when a board lists it again), `error_unavailable` / `error_notify` /
+`error_scorer` (tried again on later runs: from the retry list for up to 24 hours after first being saved, and whenever a
+board lists the job again; `error_notify` means no Slack or email channel delivered the alert, `error_scorer` that every
+scorer failed on the job; an `error_scorer` job more than 24 hours old that no board lists again keeps that status
+and is in effect final), `error_terminal` (a board listed an `error_scorer` job again more than 24 hours after it was
+first saved, and every scorer still failed on it; not retried), or `error` (processing the job crashed; tried again when a board lists it again).
 
 A job is notified once: the same title at the same company counts as one job whatever board, id or location it comes
 with.
@@ -223,8 +236,10 @@ with.
 Each alert email has four buttons: ✅ Applied, 👍 Good, 🤷 Maybe and 👎 Bad match. Tapping one opens a pre-filled email to
 your own plus address (`you+jobhunter-feedback@gmail.com`); send it, and the next run reads it over IMAP with the same
 Gmail app password, saves the verdict, and files the message under the label `jobhunter/feedback`. Nothing goes through
-a server and nothing tracks opens. `export-feedback` turns the verdicts into training labels for the next Laya
-fine-tune (docs/settings.md, notify).
+a server and nothing tracks opens. A message is trusted only from your own addresses and, when Gmail's
+`Authentication-Results` header is there, only if it passed DKIM, SPF or DMARC. `export-feedback` writes each job's latest
+verdict to `data/feedback_labels.csv`: a record of your verdicts, not yet a training input (turning them into training
+pools is a manual step; docs/settings.md, notify).
 
 To try it: `send-test-alert`, tap a button on your phone and send, `run --only <one board>` (the log shows
 `feedback: 1 saved`), then `export-feedback` shows the row.
@@ -244,8 +259,12 @@ To try it: `send-test-alert`, tap a button on your phone and send, `run --only <
 
 - The same posting found on two boards (for example Stripe through `top_companies` and through `greenhouse`) is two
   jobs, and Workday job ids do not include the company; both keep job ids identical to job-notifier's.
-- A site's DNS answer is checked before a page download but could change in between; for a single-user tool this is
-  accepted.
+- A site's DNS answer is checked before a page download but could change in between (DNS rebinding); for a
+  single-user tool this is accepted.
+- A feedback email that Gmail added no `Authentication-Results` header to (one you sent to yourself may have none) is
+  trusted by its From address alone, which a sender could forge.
+- A board that times out is left behind, not stopped: its thread keeps running in the background until the run's
+  process exits.
 - Jobs are scored one at a time.
 
 ## Using job sites responsibly
@@ -259,6 +278,11 @@ down. You are responsible for following each site's terms of use; turn off any b
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
+
+The base install (`requirements.txt`) runs everything except the Laya training tests, which are skipped. The full
+suite needs `requirements-laya.txt` and `requirements-train.txt` too. Tests that load a real checkpoint run only with
+`LAYA_SLOW_TESTS=1`, plus `LAYA_SLOW_BASE` (a fine-tuned Laya folder, for the training tests) or `LAYA_SLOW_MODEL` (a
+questions checkpoint folder); without them they are skipped.
 
 ## License
 

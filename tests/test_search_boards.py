@@ -46,6 +46,10 @@ class TestHydePark(unittest.TestCase):
         self.assertEqual(kw["json"]["filters"], {"job_functions": ["Software Engineering"]})
         self.assertIs(kw["retry"], True)          # a search, so safe to repeat
 
+    def test_an_unknown_location_is_left_empty_not_called_remote(self):
+        http = FakeHttp(lambda m, u, kw: FakeResponse(json_data={"results": {"jobs": [getro(1, 2, locations=[])]}}))
+        self.assertEqual([j.location for j in HydeParkBoard({}).search(ctx(http))], [""])
+
     def test_a_failed_search_fails_the_board(self):
         http = FakeHttp(lambda m, u, kw: FakeResponse(status_code=500, json_data={}))
         with self.assertRaises(RuntimeError):
@@ -130,6 +134,14 @@ class TestTopCompanies(unittest.TestCase):
         self.assertEqual(jobs[1].description, "Payments")
         amazon_calls = [c for c in http.calls if "amazon.jobs" in c[1]]
         self.assertEqual([c[2]["params"]["base_query"] for c in amazon_calls], ["a", "b", "c", "d"])
+
+    def test_a_greenhouse_company_posting_is_dated_by_its_first_publication(self):
+        edited = {"jobs": [{"id": 78, "title": "Backend Engineer", "updated_at": NOW.isoformat(),
+                            "first_published": (NOW - timedelta(days=30)).isoformat(),
+                            "location": {"name": "Remote - US"}, "absolute_url": "https://stripe.com/jobs/78"}]}
+        http = FakeHttp(lambda m, u, kw: FakeResponse(json_data=edited))
+        jobs = list(TopCompaniesBoard({"amazon": False, "greenhouse": {"stripe": "Stripe"}}).search(ctx(http)))
+        self.assertEqual(jobs, [])
 
 
 class TestOneBadListingSearchBoards(unittest.TestCase):

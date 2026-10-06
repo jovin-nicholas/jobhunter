@@ -266,7 +266,7 @@ def load_settings(path: str | Path, env: Mapping[str, str] | None = None) -> Set
 
 def _resumes(c: _Checker, raw: Any, base: Path) -> ResumeSettings:
     if raw is None:
-        c.add("resumes", "missing: needs at least `folder` and `default`")
+        c.add("resumes", "missing: needs `default`, the resume file used when no version matches")
         return ResumeSettings(base / "resumes", "")
     raw = c.mapping("resumes", raw, {"folder", "default", "versions", "names"})
     folder = Path(str(raw.get("folder", "resumes"))).expanduser()
@@ -291,7 +291,7 @@ def _resumes(c: _Checker, raw: Any, base: Path) -> ResumeSettings:
 
 def _search(c: _Checker, raw: Any) -> SearchSettings:
     if raw is None:
-        c.add("search", "missing: needs `queries` and `locations`")
+        c.add("search", "missing: needs `queries`")
         return SearchSettings([], [])
     raw = c.mapping("search", raw, {"queries", "locations", "max_age_hours", "fetch_descriptions"})
     queries = c.strings("search.queries", raw.get("queries"))

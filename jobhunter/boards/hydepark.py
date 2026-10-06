@@ -40,7 +40,7 @@ class HydeParkBoard:
             posted = parse_time(created)
             return Job(id=f"hydepark_{item['id']}", title=(item.get("title") or "").strip(),
                        company=((item.get("organization") or {}).get("name") or "Unknown").strip(),
-                       location=", ".join(item.get("locations") or []) or "Remote", url=url,
+                       location=", ".join(item.get("locations") or []), url=url,
                        posted_at=posted.isoformat() if posted else "", description="", source="hydepark",
                        ats=ats_of(url, "hydepark"))
 

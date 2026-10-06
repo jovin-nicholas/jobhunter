@@ -3,7 +3,9 @@ import os
 import sys
 import tempfile
 import unittest
+from importlib.util import find_spec
 from pathlib import Path
+from unittest.mock import patch
 
 from jobhunter.errors import ScorerError, ScorerUnavailable
 from jobhunter.models import Job, Resume, score_label
@@ -12,6 +14,9 @@ from jobhunter.scorers.laya import LayaScorer, alert_state, band_score, build_st
 JOB = Job("t_1", "Backend Engineer", "Acme", "Austin, TX", "https://example.com/1",
           description="Java and Kubernetes services. " + "x" * 9000)
 RESUME = Resume("backend.txt", "the candidate — SDE. Java, Spring Boot.")
+# check() first asks whether laya and torch are installed; these tests are about the checkpoint, so they pretend both
+# are, and run on the base install (requirements.txt) too.
+INSTALLED = patch("jobhunter.scorers.laya.importlib.util.find_spec", new=lambda name, package=None: object())
 
 
 def score_probs(**by_score):
@@ -75,6 +80,14 @@ class TestAlertMethod(unittest.TestCase):
         self.assertEqual(scorer.score(JOB, RESUME).decision, "notify")
         self.assertIn("45%", scorer.describe())
 
+    def test_a_zero_override_is_still_an_override(self):
+        # The settings check rejects save_at 0 for an alert checkpoint, so it is set after construction: describe()
+        # must not take a falsy override for "no override".
+        scorer, _ = self.scorer(0.5)
+        scorer.options.save_at = 0.0
+        self.assertEqual(scorer.describe(),
+                         "laya: alert at 60% fit or higher, save for later from 0% (overridden in jobhunter.yaml)")
+
     def test_inverted_overrides_are_rejected(self):
         with self.assertRaises(ValueError):
             LayaScorer({"model": alert_checkpoint(), "alert_at": 0.3, "save_at": 0.5}, agent_factory=lambda p, d: None)
@@ -98,10 +111,12 @@ class TestAlertMethod(unittest.TestCase):
             LayaScorer({"model": checkpoint("question"), "alert_at": 0.6, "save_at": 0.3},
                       agent_factory=lambda p, d: None)
 
+    @INSTALLED
     def test_check_flags_an_incomplete_alert_block(self):
         scorer = LayaScorer({"model": alert_checkpoint(with_block=False)}, agent_factory=lambda p, d: None)
         self.assertIn("alert checkpoint has no question or cut-offs in rl_agent_config.json", scorer.check())
 
+    @INSTALLED
     def test_check_is_clean_for_a_complete_alert_checkpoint(self):
         scorer = LayaScorer({"model": alert_checkpoint()}, agent_factory=lambda p, d: None)
         self.assertIsNone(scorer.check())
@@ -152,6 +167,7 @@ class TestLayaScorer(unittest.TestCase):
         with self.assertRaises(ScorerError):
             scorer.score(JOB, RESUME)
 
+    @INSTALLED
     def test_unsupported_method_check_message(self):
         scorer = LayaScorer({"model": checkpoint("levels")}, agent_factory=lambda p, d: None)
         self.assertEqual(scorer.check(),
@@ -339,6 +355,7 @@ class TestQuestionsMethod(unittest.TestCase):
         outcome = ScorerChain([("laya", scorer)], Decisions(notify_at=7, log_at=5)).score(JOB, RESUME)
         self.assertEqual(outcome.result.decision, "notify")
 
+    @unittest.skipIf(find_spec("numpy") is None, "needs numpy: pip install -r requirements-train.txt")
     def test_parity_with_training(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
         try:
@@ -411,9 +428,11 @@ class TestQuestionsMethod(unittest.TestCase):
                 with self.subTest(model=model, options=options), self.assertRaises(ValueError):
                     LayaScorer({"model": model, **options}, agent_factory=lambda p, d: None)
 
+    @INSTALLED
     def test_check_is_clean_for_a_complete_checkpoint(self):
         self.assertIsNone(self.scorer()[0].check())
 
+    @INSTALLED
     def test_check_names_what_an_incomplete_checkpoint_lacks(self):
         scorer = LayaScorer({"model": questions_checkpoint(drop=("gates", "cutoffs"))}, agent_factory=lambda p, d: None)
         self.assertEqual(scorer.check(),
@@ -446,9 +465,9 @@ class TestQuestionsMethod(unittest.TestCase):
 @unittest.skipUnless(os.environ.get("LAYA_SLOW_TESTS"), "set LAYA_SLOW_TESTS=1 to load a real checkpoint")
 class TestQuestionsCheckpointSlow(unittest.TestCase):
     def test_scores_an_invented_job_end_to_end(self):
-        model = Path(__file__).resolve().parent.parent.parent / "models" / "laya_questions_v1"
-        if not model.is_dir():
-            self.skipTest(f"{model} not found")
+        model = Path(os.environ.get("LAYA_SLOW_MODEL") or "")
+        if not os.environ.get("LAYA_SLOW_MODEL") or not model.is_dir():
+            self.skipTest("set LAYA_SLOW_MODEL to a questions checkpoint folder")
         scorer = LayaScorer({"model": str(model)})
         self.assertIsNone(scorer.check())
         job = Job("t_slow", "Backend Software Engineer", "Example Co", "Remote", "https://example.com/slow",

@@ -139,8 +139,9 @@ def run_lock(path: Path):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def _export_feedback(store: Store, out: str, since: str | None) -> int:
-    """Each job's latest verdict, in label_overrides.csv's columns plus the verdict and when it was given."""
+def _export_feedback(store: Store, out: str | Path, since: str | None) -> int:
+    """Each job's latest verdict, with the decision it stands for and when it was given: a record of verdicts.
+    Turning it into training pools is a manual step today."""
     if since and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
         print("jobhunter: --since must be a date like 2026-10-05 (YYYY-MM-DD)", file=sys.stderr)
         return 2
@@ -192,8 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     cmp_cmd = sub.add_parser("compare-db", help="compare decisions with a job-notifier database, job by job")
     cmp_cmd.add_argument("path", help="path to job-notifier's data/jobs.db (opened read-only)")
     cmp_cmd.add_argument("--since", help="only jobs jobhunter handled on or after this date (YYYY-MM-DD)")
-    exp = sub.add_parser("export-feedback", help="write feedback verdicts from alert buttons as training labels (CSV)")
-    exp.add_argument("--out", default="feedback_labels.csv", help="output file (default: ./feedback_labels.csv)")
+    exp = sub.add_parser("export-feedback", help="write the verdicts given with the alert buttons to a CSV")
+    exp.add_argument("--out", help="output file (default: data/feedback_labels.csv next to the settings file)")
     exp.add_argument("--since", help="only verdicts on or after this date (YYYY-MM-DD)")
     sub.add_parser("send-test-alert", help="email yourself an alert for the last notified job, to try the buttons")
     args = parser.parse_args(argv)
@@ -239,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             return _print_problems(e.problems)
         store = Store(settings.data_dir / "jobs.db")
         if args.command == "export-feedback":
-            return _export_feedback(store, args.out, args.since)
+            return _export_feedback(store, args.out or settings.data_dir / "feedback_labels.csv", args.since)
         return _send_test_alert(settings, store)
 
     try:

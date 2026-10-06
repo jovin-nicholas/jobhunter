@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Iterator
 
 from jobhunter.boards.common import cutoff, each_listing, is_fresh
-from jobhunter.boards.greenhouse import LIST_URL as GREENHOUSE_LIST_URL, to_job as greenhouse_job
+from jobhunter.boards.greenhouse import LIST_URL as GREENHOUSE_LIST_URL, published_at, to_job as greenhouse_job
 from jobhunter.models import Job, SearchContext
 from jobhunter.registry import board
 from jobhunter.text_clean import html_to_text
@@ -42,7 +42,7 @@ def _amazon_job(item: dict, limit, seen: set[str]) -> Job | None:
 
 def _greenhouse_job(raw: dict, slug: str, label: str, limit, seen: set[str]) -> Job | None:
     job_id = f"top_{slug}_{raw.get('id')}"
-    if job_id in seen or not is_fresh(raw.get("updated_at"), limit):
+    if job_id in seen or not is_fresh(published_at(raw), limit):
         return None
     job = greenhouse_job(raw, slug)
     job.id, job.company, job.source = job_id, label, "top_companies"

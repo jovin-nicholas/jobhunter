@@ -6,11 +6,20 @@ words near it name experience ("of hands-on software development experience", "E
 years work experience"), and not when the sentence is about the company ("With 40+ years of experience in the
 Insurtech game, we're…"), about something else ("18 years or older", "vests over 4 years"), or only preferred.
 
+A mention with no experience word still counts when it reads as one: "8+ years of Java", "7+ years with Go" (a "+"
+before "years" and of/with/in after it), "5 years of Python" on a bulleted line or under a requirements heading, "2 years
+required", or a label such as "Years of experience: 4". The skill form counts only when it opens its clause (or follows
+"Must have", "At least"...), is not "in a row" or "of the …", is not called optional on its line ("(preferred)", "a
+plus"), and is not a bullet under a section about the company or the offer (Benefits, Why Acme?, About us).
+
 Mentions joined by "or" are alternatives and the lowest counts ("5 years, or 2 with a Master's"); everything else is
 required and the highest counts ("7+ years of Java. 3+ years with Spring."). Years under a "Preferred qualifications"
 or "Nice to have" heading are not required.
 """
 from __future__ import annotations
+
+import html
+import re
 
 WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
                 "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20}
@@ -50,6 +59,27 @@ MAX_HEADING_WORDS = 8
 OR_REACH = 3                  # "degree or a minimum of 4 years": words between "or" and the number
 MAX_LABEL_WORDS = 5          # "Preferred Qualifications (Nice-to-Have)"; longer lines are bullets
 CLAUSE_ENDS = {",", ";", ":", "(", ")"}
+# "2 years required": right after "years" these make it a requirement.
+REQUIRED_AFTER = {"required", "minimum", "mandatory", "must"}
+# "8+ years of Java", "7+ years with Go", "10+ years in backend roles": a skill or field after "years".
+SKILL_LINKS = {"of", "with", "in"}
+# A heading that opens the requirements ("Qualifications:", "Requirements", "What you'll need"): years under it with
+# a skill after them count, as on a bullet.
+REQUIRED_HEADING = {"qualifications", "requirements", "requirement", "required", "minimum", "basic", "skills",
+                    "experience", "need", "bring", "must"}
+BULLETS = ("-", "*", "\u2013", "\u2022")
+# Before "N years of <skill>" only these may open its clause ("Must have 6 years of Java", "At least 4 years with
+# Go"): any other word makes the years something else ("401k matching after 5 years of service").
+SKILL_LEADS = {"minimum", "min", "at", "least", "requires", "required", "require", "need", "needs", "must", "have",
+               "a", "of"}
+ARTICLES = {"a", "an", "the"}               # "5 years of the company's history" (but "5+ years in a SaaS role")
+_BLOCK_TAG = re.compile(r"<\s*(?:br|/?p|/?li|/?ul|/?ol|/?div|/?h[1-6]|/?tr)\b[^>]*>", re.I)
+_TAG = re.compile(r"<[a-zA-Z/!][^>]*>")
+LINE_HEADING_ENDS = {":", "-", "\u2013", "\u2014"}      # "Qualifications - 5+ years", "Requirements: 6 years"
+# On the same line these make "N years of <skill>" optional ("5 years of Java (preferred)", "Go is a plus").
+SOFT_ON_LINE = {"preferred", "preferably", "ideally", "bonus", "desired", "desirable"}
+# Short lines that open a section about the company or the offer: bullets under them are not requirements.
+OTHER_SECTION_FIRST = {"benefits", "perks", "why", "about", "compensation", "culture", "what's", "whats", "our"}
 
 
 def _sentences(text: str) -> list[str]:
@@ -57,9 +87,9 @@ def _sentences(text: str) -> list[str]:
     out, current = [], []
     for i, ch in enumerate(text or ""):
         nxt = text[i + 1] if i + 1 < len(text) else " "
-        if ch in "\n!?;•" or (ch == "." and nxt.isspace()):
+        if ch in "\n!?;\u2022" or (ch == "." and nxt.isspace()):
             out.append("".join(current))
-            current = []
+            current = ["\u2022 "] if ch == "\u2022" else []      # a bullet stays marked as one
         else:
             current.append(ch)
     out.append("".join(current))
@@ -141,10 +171,15 @@ def _clause_after(tokens: list[str], years_at: int) -> list[str]:
     return clause
 
 
+def _clause_before(tokens: list[str], start: int) -> list[str]:
+    """The words of the mention's clause before its number."""
+    first = max((k + 1 for k in range(start) if tokens[k] in CLAUSE_ENDS), default=0)
+    return tokens[first:start]
+
+
 def _clause(tokens: list[str], start: int, years_at: int) -> list[str]:
     """The mention's own clause: from the last clause end before it to the next one after "years"."""
-    first = max((k + 1 for k in range(start) if tokens[k] in CLAUSE_ENDS), default=0)
-    return tokens[first:start] + tokens[start:years_at + 1] + _clause_after(tokens, years_at)
+    return _clause_before(tokens, start) + tokens[start:years_at + 1] + _clause_after(tokens, years_at)
 
 
 def _stands_in_for_a_degree(before: list[str]) -> bool:
@@ -162,12 +197,15 @@ def _stands_in_for_a_degree(before: list[str]) -> bool:
     return True
 
 
-def _judge(tokens: list[str], start: int, years_at: int, low: int, company: frozenset[str] = frozenset()) -> str:
+def _judge(tokens: list[str], start: int, years_at: int, low: int, company: frozenset[str] = frozenset(),
+           listed: bool = False) -> str:
     """ "rejected" (not a requirement), "weak" (no experience word: counts only as an alternative to a requirement)
-    or "required"."""
+    or "required". `listed`: the mention is on a bulleted line or under a requirements heading."""
     before = set(tokens[max(0, start - BEFORE):start])
     if low > MAX_YEARS or set(tokens[years_at + 1:years_at + 4]) & NOT_EXPERIENCE_WORDS:
         return "rejected"
+    if tokens[years_at + 1:years_at + 4] == ["in", "a", "row"]:
+        return "rejected"           # "Best Places to Work 8 years in a row, with a strong engineering culture"
     soft = before & PREFERRED_BEFORE
     if soft == {"typically"} and before & REQUIREMENT_LEADS:
         soft = set()                # "Typically requires 8+ years" is still a requirement
@@ -177,12 +215,88 @@ def _judge(tokens: list[str], start: int, years_at: int, low: int, company: froz
         return "rejected"
     if before & (COMPANY_NOUNS | company):
         return "rejected"           # "a company with 18 years", "working with Genesis10 for 5-20+ years"
-    if set(tokens) & COMPANY_WORDS and not set(_clause(tokens, start, years_at)) & CANDIDATE_WORDS:
-        return "rejected"           # "With 40+ years of experience in the Insurtech game, we're…"
+    clause = set(_clause(tokens, start, years_at))
+    # A company noun anywhere before the mention in its clause makes the company its subject ("The team has built
+    # software for 15 years"); after it ("5+ years at a top technology firm") it is where the candidate worked.
+    subject = set(_clause_before(tokens, start))
+    if (set(tokens) & COMPANY_WORDS or subject & COMPANY_NOUNS) and not clause & CANDIDATE_WORDS:
+        return "rejected"           # "With 40+ years of experience in the Insurtech game, we're…", "The team has…"
     near = set(tokens[max(0, start - EXPERIENCE_BEFORE):start]) | set(tokens[years_at + 1:years_at + 1 + AFTER])
     if near & EXPERIENCE_WORDS or set(tokens[max(0, start - EXPERIENCE_BEFORE):start]) & REQUIREMENT_LEADS:
         return "required"
+    if set(tokens[years_at + 1:years_at + 3]) & REQUIRED_AFTER:
+        return "required"           # "2 years required"
+    if _skill_years(tokens, start, years_at) and ("+" in tokens[start:years_at] or listed):
+        return "required"           # "8+ years of Java"; "- 5 years of Python"
     return "weak"
+
+
+def _skill_years(tokens: list[str], start: int, years_at: int) -> bool:
+    """ "8+ years of Java", "7+ years with Go", "10+ years in MLOps", opening their clause (or after a lead such as
+    "Must have"), not "in a row", and not on a line that calls them optional."""
+    if years_at + 2 >= len(tokens) or tokens[years_at + 1] not in SKILL_LINKS:
+        return False
+    nxt = tokens[years_at + 2]
+    if not nxt.isalpha() or (tokens[years_at + 1] == "of" and nxt in ARTICLES):
+        return False                # "in a row" is rejected in _judge
+    before = _clause_before(tokens, start)
+    if _line_heading(tokens):               # "Qualifications - 5+ years in QA": the heading is not the clause
+        end = next(k for k, t in enumerate(tokens) if t in LINE_HEADING_ENDS)
+        before = tokens[end + 1:start] if end < start else before
+    if not set(t for t in before if t.isalnum()) <= SKILL_LEADS:
+        return False
+    return not (set(tokens) & SOFT_ON_LINE or _has(tokens, "a", "plus") or _has(tokens, "nice", "to", "have"))
+
+
+def _plain(text: str) -> str:
+    """Text without HTML: block tags become line breaks (each <li> its own line), other tags go, and entities
+    (&nbsp;, &amp;, &#39;) are decoded."""
+    text = _TAG.sub(" ", _BLOCK_TAG.sub("\n", text or ""))
+    return html.unescape(text).replace("\xa0", " ")
+
+
+def _line_heading(tokens: list[str]) -> bool:
+    """ "Qualifications - 5+ years in QA roles", "What You Bring: ...": a requirements heading opening the line."""
+    end = next((k for k, t in enumerate(tokens) if t in LINE_HEADING_ENDS), None)
+    if not end:
+        return False
+    words = tokens[:end]
+    if len(words) > MAX_LABEL_WORDS or not all(t.isalpha() or "'" in t for t in words):
+        return False
+    return bool(set(words) & REQUIRED_HEADING) and not set(words) & PREFERRED_HEADING
+
+
+def _has(tokens: list[str], *words: str) -> bool:
+    n = len(words)
+    return any(tuple(tokens[k:k + n]) == words for k in range(len(tokens) - n + 1))
+
+
+def _other_section(tokens: list[str]) -> bool:
+    """ "Benefits", "Perks:", "Why Acme?", "What's in it for you", "About Acme", "Who we are": a short heading-like
+    line that opens a section about the company or the offer ("About you" is about the candidate)."""
+    words = [t for t in tokens if t.isalpha() or "'" in t]
+    if not words or len(words) > MAX_LABEL_WORDS or any(t[0].isdigit() for t in tokens):
+        return False
+    if words[:3] == ["who", "we", "are"]:
+        return True
+    return words[0] in OTHER_SECTION_FIRST and words[1:2] != ["you"] and (len(words) > 1 or words[0] != "our")
+
+
+def _labelled_years(tokens: list[str]) -> list[int]:
+    """ "Years of experience: 4", "Minimum years of relevant experience - 6": the number after the label."""
+    found = []
+    for k, token in enumerate(tokens):
+        if token not in YEAR_WORDS:
+            continue
+        label = tokens[k + 1:k + 5]
+        if "experience" not in label:
+            continue
+        e = k + 1 + label.index("experience")
+        if e + 2 < len(tokens) and tokens[e + 1] in (":", "-"):
+            n = _number(tokens[e + 2])
+            if n is not None and n <= MAX_YEARS:
+                found.append(n)
+    return found
 
 
 def _heading(sentence: str, tokens: list[str]) -> bool | None:
@@ -210,22 +324,28 @@ def required_years(text: str, company: str = "") -> int | None:
     right after its name as the company's history.
     """
     names = frozenset(t for t in _tokens(company) if t.isalpha() and len(t) >= 3) - {"inc", "llc", "ltd", "the", "corp"}
-    required, in_preferred, joined = [], False, False
-    for sentence in _sentences(text):
+    required, in_preferred, in_required, in_other, joined = [], False, False, False, False
+    for sentence in _sentences(_plain(text)):
         tokens = _tokens(sentence)
         if [t for t in tokens if t.isalpha()] == ["or"]:
             joined = True               # a line that only says "OR": the lines around it are alternatives
             continue
+        if _other_section(tokens):
+            in_preferred, in_required, in_other = False, False, True     # Benefits, Why Acme?, About Acme
+            continue
         heading = _heading(sentence, tokens)
         if heading is not None:
             in_preferred = heading
+            in_required = not heading and bool(set(tokens) & REQUIRED_HEADING)
+            in_other = not heading and not in_required
             continue
         if in_preferred:
             continue
-        groups, previous_end = [], None
+        listed = in_required or _line_heading(tokens) or (not in_other and sentence.lstrip().startswith(BULLETS))
+        groups, previous_end = [[(n, "required")] for n in _labelled_years(tokens)], None
         for start, low in _mentions(tokens):
             years_at = next(k for k in range(start, len(tokens)) if tokens[k] in YEAR_WORDS)
-            verdict = _judge(tokens, start, years_at, low, names)
+            verdict = _judge(tokens, start, years_at, low, names, listed)
             if verdict == "rejected":
                 continue
             if groups and "or" in tokens[previous_end:start]:

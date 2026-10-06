@@ -24,7 +24,7 @@ BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.3
               "Chrome/120.0.0.0 Safari/537.36")
 # Job boards and ATS sites: redirects are followed and larger pages allowed.
 TRUSTED_DOMAINS = ("linkedin.com", "amazon.jobs", "greenhouse.io", "ashbyhq.com", "lever.co", "myworkdayjobs.com",
-                   "dover.io", "gem.com", "adp.com", "dev.to", "dice.com", "getro.com", "monster.com")
+                   "dover.com", "dover.io", "gem.com", "adp.com", "dev.to", "dice.com", "getro.com", "monster.com")
 _LIMITS = {True: (15, 2_000_000), False: (8, 400_000)}      # trusted? -> (timeout in s, max bytes)
 MAX_REDIRECTS = 5
 _REDIRECTS = {301, 302, 303, 307, 308}
@@ -136,7 +136,7 @@ def fetch_description(http: Any, url: str, log: Callable[[str], None] = print, r
     timeout, max_bytes = _LIMITS[trusted]
     current = url
     try:
-        for hop in range(MAX_REDIRECTS + 1):
+        for _ in range(MAX_REDIRECTS + 1):
             resp = http.request("GET", current, headers={"User-Agent": BROWSER_UA}, timeout=timeout,
                                 allow_redirects=False, stream=True)
             location = (getattr(resp, "headers", None) or {}).get("Location")

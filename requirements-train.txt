@@ -1,4 +1,6 @@
-# requirements-train.txt: fine-tuning Laya (training/), on top of requirements-laya.txt
+# requirements-train.txt: fine-tuning Laya (training/): requirements-laya.txt (jobhunter, laya and PyTorch) plus these
+-r requirements-laya.txt
+numpy
 scikit-learn>=1.5
 pandas>=2.2
 scipy>=1.13
