@@ -18,8 +18,9 @@ to ask. A Hugging Face id uses the `question` method.
   gate. The fit is summarised as the expected score (`expected`) or the chance of a 7-10 (`p_good`) and compared with
   `alert_at` / `save_at`. Results show as "fit 6.42/10" (or "fit NN%" for `p_good`).
 
-The alert and questions cut-offs and gates can be overridden in `jobhunter.yaml` ([docs/settings.md](../docs/settings.md#scorers-required)).
-`check-config` prints the ones in use and where each comes from.
+The alert and questions cut-offs and gates can be overridden in `jobhunter.yaml`
+([docs/settings.md](../docs/settings.md#scorers-required)). `check-config` prints the ones in use and where each comes
+from.
 
 ## Fine-tuning
 

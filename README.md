@@ -7,7 +7,7 @@ best matches. The default setup needs no account, API key or paid service.
 ## Quick start
 
 ```bash
-python3.13 -m venv .venv
+python3 -m venv .venv                                                 # Python 3.11 or later
 .venv/bin/pip install -r requirements.txt -r requirements-laya.txt   # Laya needs PyTorch
 cp jobhunter.example.yaml jobhunter.yaml                              # edit: resume, searches, filters, model
 cp .env.example .env                                                  # optional: notifications, CANDIDATE_NAMES
@@ -112,19 +112,20 @@ Under `filters:` in `jobhunter.yaml` (every option is in [docs/settings.md](docs
 
 ## Boards
 
-All 13 built-in boards run unless `boards:` lists others: `dice`, `linkedin`, `industry_jobs` (dev.to),
-`top_companies` (Amazon, SoFi, Stripe), `hydepark`, and the ATS boards `greenhouse`, `lever`, `ashby`, `workday`,
-`dover`, `adp` and `gem`, which read postings found by discovery in the public job lists, and `vc_boards` (below). Greenhouse, Lever, Ashby,
-Gem and ADP can also list whole company boards: `greenhouse: {companies: [stripe, airbnb]}`; Dover also reads its
-public feed of every company's jobs (`job_board: true`). With `discovery.getro` or `discovery.consider` set, VC portfolio job boards (Redpoint, Accel,
-a16z, ...) add their startups' jobs: a Greenhouse, Lever, Ashby, Workday, Gem, Dover or ADP link goes to that board when
-it runs with `discover` on, and every other link, including an ATS link whose board is off, not discovering or left out
-by `--only`, comes from `vc_boards`. An explicit `boards:` list must include `vc_boards` to get these jobs.
+All 13 built-in boards run unless `boards:` lists others: `dice`, `linkedin`, `industry_jobs` (dev.to), `top_companies`
+(Amazon, SoFi, Stripe), `hydepark`, the ATS boards `greenhouse`, `lever`, `ashby`, `workday`, `dover`, `adp` and `gem`,
+which read postings found by discovery in the public job lists, and `vc_boards` (below). Greenhouse, Lever, Ashby, Gem
+and ADP can also list whole company boards: `greenhouse: {companies: [stripe, airbnb]}`; Dover also reads its public
+feed of every company's jobs (`job_board: true`). With `discovery.getro` or `discovery.consider` set, VC portfolio job
+boards (Redpoint, Accel, a16z, ...) add their startups' jobs: a Greenhouse, Lever, Ashby, Workday, Gem, Dover or ADP
+link goes to that board when it runs with `discover` on, and every other link, including an ATS link whose board is off,
+not discovering or left out by `--only`, comes from `vc_boards`. An explicit `boards:` list must include `vc_boards` to
+get these jobs.
 
 - **linkedin** searches through the `linkedin-jobs-mcp` server, which needs Node.js (`npx`; the first run downloads
   it). The version is pinned (`MCP_PACKAGE` in `jobhunter/boards/linkedin.py`) and the server runs in `data/npx`, a
-  folder only you can read (mode 700), not the repo folder. Without Node.js the board is skipped with a note. Descriptions come from LinkedIn's public job-posting pages,
-  one request every 3 seconds.
+  folder only you can read (mode 700), not the repo folder. Without Node.js the board is skipped with a note.
+  Descriptions come from LinkedIn's public job-posting pages, one request every 3 seconds.
 - Requests are spaced per site; rate limits and server errors are retried with growing waits (or the site's
   `Retry-After`, up to 60 s), and a site that answers 429 is slowed down for every board.
 - Rate-limited cloud API keys (`gemini`, `groq`) rest while the others are used; when all rest, jobs move on to the
@@ -152,7 +153,8 @@ An optional `enrich(job, ctx)` method can fetch a full description for new jobs 
 polite session with retries), `discovery.urls()` (this run's ATS links), `is_known(job_id)` (already finished, so skip
 fetching it), `mark_stale(job_id)` (too old) and `mark_gone(job_id)` (no longer exists); both are skipped on later
 runs. `mark_empty(job_id)` records a details answer with no posting in it: the posting is asked for again, and becomes
-`gone` once it has answered empty for 24 hours. A board class may set `default_timeout_s`, and may raise `BoardSkipped` when it cannot run on this machine.
+`gone` once it has answered empty for 24 hours. A board class may set `default_timeout_s`, and may raise `BoardSkipped`
+when it cannot run on this machine.
 
 Scorers work the same way with `@scorer("name")` and a `score(job, resume)` method returning a `ScoreResult`. A scorer
 that also has `generate(prompt) -> str` can write cover letters.
@@ -167,20 +169,19 @@ that also has `generate(prompt) -> str` can write cover letters.
 | `export-feedback [--out FILE] [--since YYYY-MM-DD]` | Write each job's latest verdict from the alert buttons to a CSV (default `data/feedback_labels.csv`; columns `job_id,job_title,company,decision,verdict,received_at`) |
 | `send-test-alert` | Email yourself an alert for the last notified job, to try the feedback buttons |
 
-Each job is saved in `data/jobs.db` with a status: `notified`, `logged` or `skipped` (the score against
-`decisions`), `filtered` (with the filter's reason), `stale` or `gone` (a discovered posting too old, or no longer
-there), `duplicate` (would have been notified, but the same job was already notified in the last 30 days or earlier in
-the run), `error_429_retry` (scored again when a board lists it again), `error_unavailable` / `error_notify` /
-`error_scorer` (tried again on later runs: from the retry list for up to 24 hours after first being saved, and whenever a
-board lists the job again; `error_notify` means no Slack or email channel delivered the alert, `error_scorer` that every
-scorer failed on the job; an `error_scorer` job more than 24 hours old that no board lists again keeps that status
-and is in effect final), `error_terminal` (a board listed an `error_scorer` job again more than 24 hours after it was
-first saved, and every scorer still failed on it, or a board listed an `error` job again that long after and it crashed
-again; not retried), or `error` (processing the job crashed; tried again when a board lists it again, for up to 24 hours
-after it was first saved).
-A board that needs its own description (e.g. `vc_boards`) saves a job as `filtered` instead of retrying it forever,
-once the posting page gave no text for more than 6 hours or its URL is on a host that never allows automated
-reading (e.g. Indeed).
+Each job is saved in `data/jobs.db` with a status: `notified`, `logged` or `skipped` (the score against `decisions`),
+`filtered` (with the filter's reason), `stale` or `gone` (a discovered posting too old, or no longer there), `duplicate`
+(would have been notified, but the same job was already notified in the last 30 days or earlier in the run),
+`error_429_retry` (scored again when a board lists it again), `error_unavailable` / `error_notify` / `error_scorer`
+(tried again on later runs: from the retry list for up to 24 hours after first being saved, and whenever a board lists
+the job again; `error_notify` means no Slack or email channel delivered the alert, `error_scorer` that every scorer
+failed on the job; an `error_scorer` job more than 24 hours old that no board lists again keeps that status and is in
+effect final), `error_terminal` (a board listed an `error_scorer` job again more than 24 hours after it was first saved,
+and every scorer still failed on it, or a board listed an `error` job again that long after and it crashed again; not
+retried), or `error` (processing the job crashed; tried again when a board lists it again, for up to 24 hours after it
+was first saved). A board that needs its own description (e.g. `vc_boards`) saves a job as `filtered` instead of
+retrying it forever, once the posting page gave no text for more than 6 hours or its URL is on a host that never allows
+automated reading (e.g. Indeed).
 
 A job is notified once: the same title at the same company counts as one job whatever board, id or location it comes
 with. The company is matched as each board names it (see Known limitations).
@@ -191,9 +192,9 @@ Each alert email has four buttons: ✅ Applied, 👍 Good, 🤷 Maybe and 👎 B
 your own plus address (`you+jobhunter-feedback@gmail.com`); send it, and the next run reads it over IMAP with the same
 Gmail app password, saves the verdict, and files the message under the label `jobhunter/feedback`. Nothing goes through
 a server and nothing tracks opens. A message is trusted only from your own addresses and, when Gmail's
-`Authentication-Results` header is there, only if it passed DKIM, SPF or DMARC. `export-feedback` writes each job's latest
-verdict to `data/feedback_labels.csv`: a record of your verdicts, not yet a training input (turning them into training
-pools is a manual step; docs/settings.md, notify).
+`Authentication-Results` header is there, only if it passed DKIM, SPF or DMARC. `export-feedback` writes each job's
+latest verdict to `data/feedback_labels.csv`: a record of your verdicts, not yet a training input (turning them into
+training pools is a manual step; docs/settings.md, notify).
 
 To try it: `send-test-alert`, tap a button on your phone and send, `run --only <one board>` (the log shows
 `feedback: 1 saved`), then `export-feedback` shows the row.
