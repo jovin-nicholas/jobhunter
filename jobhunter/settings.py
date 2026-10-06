@@ -21,9 +21,10 @@ _EVERY = re.compile(r"^\s*(\d+)\s*(m|min|mins|minutes?|h|hr|hrs|hours?)\s*$", re
 _QUIET = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$")
 LEVELS = ("intern", "entry", "mid", "senior", "staff")
 _TOP_KEYS = {"resumes", "search", "boards", "filters", "scorers", "decisions", "notify", "discovery", "cover_letters", "schedule"}
-# Boards that run when `boards:` is left out: every built-in board that needs no setup of its own.
-DEFAULT_BOARDS = ("dice", "linkedin", "industry_jobs", "top_companies", "hydepark", "greenhouse", "lever", "ashby",
-                  "workday", "dover", "adp", "gem", "vc_boards")
+# Boards that run when `boards:` is left out: every built-in board that needs no setup of its own, except hydepark (one
+# VC firm's portfolio), which runs only when listed.
+DEFAULT_BOARDS = ("dice", "linkedin", "industry_jobs", "top_companies", "greenhouse", "lever", "ashby", "workday",
+                  "dover", "adp", "gem", "vc_boards")
 DEFAULT_GITHUB_READMES = [
     "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/README.md",
     "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md",

@@ -27,7 +27,7 @@ class TestExample(unittest.TestCase):
     def test_commented_options_are_examples_not_claimed_defaults(self):
         text = (ROOT / "jobhunter.example.yaml").read_text(encoding="utf-8")
         self.assertNotIn("the defaults are shown", text)
-        self.assertIn("default: all 13 built-in boards", text)
+        self.assertIn("default: 12 built-in boards", text)
         self.assertIn("default: every 1h, no quiet time", text)
 
     def test_the_commented_laya_options_load_when_uncommented(self):

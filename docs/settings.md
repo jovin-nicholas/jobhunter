@@ -26,7 +26,7 @@ Secrets never go in this file: options ending in `_env` name an environment vari
 
 ## boards
 
-Left out: all 13 built-in boards run. Given: exactly the listed boards run.
+Left out: the 12 built-in boards below run, all but `hydepark`. Given: exactly the listed boards run.
 
 ```yaml
 boards: [dice, linkedin, greenhouse]            # names only
@@ -41,7 +41,7 @@ boards:                                          # or with options
 | `linkedin` | `date_since_posted: past 24 hours`, `max_hours_old: 1`, `limit: 25`, `delay_s: 5`, `npx` | Needs Node.js; skipped with a note without it. The search server gives only a posting date, so `max_hours_old` applies only when it also says "N hours ago"; `search.max_age_hours` still applies |
 | `industry_jobs` | `tags: [jobs, hiring]` | dev.to job posts |
 | `top_companies` | `amazon: true`, `amazon_queries: 4`, `greenhouse: {sofi: SoFi, stripe: Stripe}` | amazon.jobs, searched with the first `amazon_queries` search queries, plus whole Greenhouse boards: each key is the company's id from `boards.greenhouse.io/<id>`, each value the name to show. A `greenhouse` list replaces the default one |
-| `hydepark` | `collection_id: 112`, `job_functions: [Software Engineering]`, `hits_per_page: 100` | Hyde Park Venture Partners portfolio |
+| `hydepark` | `collection_id: 112`, `job_functions: [Software Engineering]`, `hits_per_page: 100` | Hyde Park Venture Partners portfolio; runs only when listed |
 | `greenhouse`, `lever`, `ashby` | `companies: []`, `discover` (on when no companies) | Company boards and discovered postings |
 | `workday` | `discover: true` | Discovered postings only |
 | `vc_boards` | none | Jobs from `discovery.getro` / `discovery.consider` that no ATS board above reads this run; nothing to set |

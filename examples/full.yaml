@@ -31,7 +31,7 @@ boards:                                 # built-in boards, or the name of a file
     greenhouse:                         # Greenhouse companies as <id>: <name>; the id is in boards.greenhouse.io/<id>
       sofi: SoFi                        # listing companies here replaces these two defaults
       stripe: Stripe
-  hydepark:                             # jobs at Hyde Park Venture Partners portfolio companies
+  hydepark:                             # opt-in: jobs at Hyde Park Venture Partners portfolio companies
     job_functions: [Software Engineering]
   # ATS boards: `discover: true` reads postings found by discovery (below); `companies` lists whole boards,
   # e.g. greenhouse: {companies: [stripe, airbnb], discover: true}. Workday only discovers.

@@ -87,7 +87,7 @@ class TestCli(unittest.TestCase):
 
 class TestExampleSettings(unittest.TestCase):
     ALL_BOARDS = ("dice", "linkedin", "industry_jobs", "top_companies", "hydepark", "greenhouse", "lever",
-                  "ashby", "workday", "dover", "adp", "gem", "vc_boards")
+                  "ashby", "workday", "dover", "adp", "gem", "vc_boards")     # list-boards shows opt-in hydepark too
 
     def check(self, example, resumes):
         tmp = Path(tempfile.mkdtemp())
@@ -102,9 +102,9 @@ class TestExampleSettings(unittest.TestCase):
         self.assertEqual(code, 0, err)
         return tmp, out
 
-    def test_the_example_is_short_and_runs_all_thirteen_boards(self):
+    def test_the_example_is_short_and_runs_the_twelve_default_boards(self):
         tmp, out = self.check(ROOT / "jobhunter.example.yaml", ["resume.pdf"])
-        self.assertIn("13 board(s)", out)
+        self.assertIn("12 board(s)", out)
         self.assertLessEqual(len((ROOT / "jobhunter.example.yaml").read_text().splitlines()), 40)
         _, out, _ = cli("--settings", str(tmp / "jobhunter.yaml"), "list-boards")
         for name in self.ALL_BOARDS:

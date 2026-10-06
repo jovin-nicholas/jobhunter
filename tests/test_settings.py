@@ -164,6 +164,13 @@ class TestLeanSettings(unittest.TestCase):
         self.assertEqual([b.name for b in boards], list(DEFAULT_BOARDS))
         self.assertTrue(all(b.enabled and b.options == {} and b.timeout_s is None for b in boards))
 
+    def test_hydepark_is_built_in_but_runs_only_when_listed(self):
+        from jobhunter.registry import build_registry
+        self.assertNotIn("hydepark", [b.name for b in self.load(self.without_boards()).boards])
+        self.assertIn("hydepark", build_registry(Path(tempfile.mkdtemp())).boards)
+        listed = VALID.replace("  dice: {}\n", "  dice: {}\n  hydepark: {}\n")
+        self.assertIn("hydepark", [b.name for b in self.load(listed).boards])
+
     def test_a_list_of_names(self):
         text = self.without_boards().replace("filters:", "boards: [dice, greenhouse]\nfilters:")
         self.assertEqual([(b.name, b.options) for b in self.load(text).boards], [("dice", {}), ("greenhouse", {})])

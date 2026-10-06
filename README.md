@@ -112,15 +112,15 @@ Under `filters:` in `jobhunter.yaml` (every option is in [docs/settings.md](docs
 
 ## Boards
 
-All 13 built-in boards run unless `boards:` lists others: `dice`, `linkedin`, `industry_jobs` (dev.to), `top_companies`
-(Amazon, SoFi, Stripe), `hydepark`, the ATS boards `greenhouse`, `lever`, `ashby`, `workday`, `dover`, `adp` and `gem`,
-which read postings found by discovery in the public job lists, and `vc_boards` (below). Greenhouse, Lever, Ashby, Gem
-and ADP can also list whole company boards: `greenhouse: {companies: [stripe, airbnb]}`; Dover also reads its public
-feed of every company's jobs (`job_board: true`). With `discovery.getro` or `discovery.consider` set, VC portfolio job
-boards (Redpoint, Accel, a16z, ...) add their startups' jobs: a Greenhouse, Lever, Ashby, Workday, Gem, Dover or ADP
-link goes to that board when it runs with `discover` on, and every other link, including an ATS link whose board is off,
-not discovering or left out by `--only`, comes from `vc_boards`. An explicit `boards:` list must include `vc_boards` to
-get these jobs.
+Unless `boards:` lists others, 12 built-in boards run: `dice`, `linkedin`, `industry_jobs` (dev.to), `top_companies`
+(Amazon, SoFi, Stripe), the ATS boards `greenhouse`, `lever`, `ashby`, `workday`, `dover`, `adp` and `gem`, which read
+postings found by discovery in the public job lists, and `vc_boards` (below). Greenhouse, Lever, Ashby, Gem and ADP can
+also list whole company boards: `greenhouse: {companies: [stripe, airbnb]}`; Dover also reads its public feed of every
+company's jobs (`job_board: true`). With `discovery.getro` or `discovery.consider` set, VC portfolio job boards
+(Redpoint, Accel, a16z, ...) add their startups' jobs: a Greenhouse, Lever, Ashby, Workday, Gem, Dover or ADP link goes
+to that board when it runs with `discover` on, and every other link, including an ATS link whose board is off, not
+discovering or left out by `--only`, comes from `vc_boards`. An explicit `boards:` list must include `vc_boards` to get
+these jobs. `hydepark` (the Hyde Park Venture Partners portfolio) is built in too but runs only when listed.
 
 - **linkedin** searches through the `linkedin-jobs-mcp` server, which needs Node.js (`npx`; the first run downloads
   it). The version is pinned (`MCP_PACKAGE` in `jobhunter/boards/linkedin.py`) and the server runs in `data/npx`, a
