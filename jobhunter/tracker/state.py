@@ -16,7 +16,21 @@ def last_activity(app: dict) -> date:
     return max([date.fromisoformat(e["at"]) for e in app["events"]] or [date.fromisoformat(app["applied_at"])])
 
 
-def attention(app: dict, today: date, ghost_after_days: int) -> tuple[int, str, str | None] | None:
+def _follow_up_due(app: dict, today: date, settings: TrackerSettings) -> str | None:
+    """The follow-up date: the one set, else for an application still in `applied` with no follow-up event at all
+    (added by review, quick add, an email or the import) the applied date plus the `applied` follow-up days. A derived
+    date more than ghost_after_days past is dropped, so old imported rows become ghost suggestions instead."""
+    if app.get("follow_up_at"):
+        return app["follow_up_at"]
+    days = settings.follow_up_days.get("applied")
+    if app["stage"] != "applied" or not days or any(e["kind"] in ("follow_up_set", "follow_up_done")
+                                                    for e in app["events"]):
+        return None
+    due = date.fromisoformat(app["applied_at"]) + timedelta(days=days)
+    return due.isoformat() if (today - due).days <= settings.ghost_after_days else None
+
+
+def attention(app: dict, today: date, settings: TrackerSettings) -> tuple[int, str, str | None] | None:
     """(priority, reason, due date) when the application needs the user, lowest priority first; None when it can
     wait. Order: an offer, a screen or interview in the next SOON_DAYS, a follow-up due, then a ghost suggestion."""
     if app["stage"] in CLOSED_STAGES:
@@ -29,9 +43,10 @@ def attention(app: dict, today: date, ghost_after_days: int) -> tuple[int, str, 
     if upcoming:
         at, value = upcoming[0]
         return 1, value, at
-    if app.get("follow_up_at") and date.fromisoformat(app["follow_up_at"]) <= today:
-        return 2, "follow up", app["follow_up_at"]
-    if app["stage"] == "applied" and (today - last_activity(app)).days >= ghost_after_days:
+    follow_up = _follow_up_due(app, today, settings)
+    if follow_up and date.fromisoformat(follow_up) <= today:
+        return 2, "follow up", follow_up
+    if app["stage"] == "applied" and (today - last_activity(app)).days >= settings.ghost_after_days:
         return 3, "ghost?", None
     return None
 
@@ -46,7 +61,7 @@ def build_state(apps: list[dict], review: list[dict], settings: TrackerSettings,
     needs, waiting, closed = [], [], []
     for app in apps:
         row = {**app, "age_days": max(0, (today - last_activity(app)).days)}
-        why = attention(app, today, settings.ghost_after_days)
+        why = attention(app, today, settings)
         if app["stage"] in CLOSED_STAGES:
             closed.append(row)
         elif why:
