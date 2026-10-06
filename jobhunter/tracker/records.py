@@ -3,10 +3,12 @@ connection (WAL, 30 s busy timeout), so a scheduled run writing at the same mome
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timezone
+import uuid
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from jobhunter.feedback import VERDICTS
 from jobhunter.store import Store
 from jobhunter.tracker import EVENT_KINDS, OPEN_STAGES, STAGES
 
@@ -215,3 +217,39 @@ class Applications:
             row = conn.execute("SELECT j.jd_text FROM applications a JOIN jobs j ON j.id = a.job_id WHERE a.id = ?",
                                (app_id,)).fetchone()
         return (row[0] or "") if row else ""
+
+    def review_queue(self, days: int, now: datetime | None = None) -> list[dict]:
+        """Notified jobs from the last `days` with no application, not hidden and not judged bad, newest first."""
+        cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).isoformat()
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT j.id, j.title, j.company, j.url, j.source, j.score_label, j.match_score, j.run_at FROM jobs j "
+                "WHERE j.status = 'notified' AND j.run_at >= ? "
+                "AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id) "
+                "AND NOT EXISTS (SELECT 1 FROM review_hidden h WHERE h.job_id = j.id) "
+                "AND COALESCE((SELECT f.verdict FROM feedback f WHERE f.job_id = j.id "
+                "ORDER BY f.received_at DESC, f.id DESC LIMIT 1), '') NOT IN ('bad', 'applied') "
+                "ORDER BY j.run_at DESC, j.id DESC LIMIT 200", (cutoff,)).fetchall()
+        return [{"job_id": i, "title": t or "", "company": c or "", "url": safe_url(u or ""), "board": b or "",
+                 "fit": label or (f"{score}/10" if score is not None else ""), "fit_score": score, "alerted_at": at}
+                for i, t, c, u, b, label, score, at in rows]
+
+    def hide_from_review(self, job_id: str) -> None:
+        with self.store.connect() as conn:
+            conn.execute("INSERT OR IGNORE INTO review_hidden (job_id, hidden_at) VALUES (?, ?)", (job_id, now_iso()))
+
+    def record_verdict(self, job_id: str, verdict: str) -> None:
+        """A training label from the tracker (a or b), saved like an email verdict so export-feedback reads it."""
+        if verdict not in ("applied", "bad") or verdict not in VERDICTS:
+            raise ValueError(f"the tracker records only applied or bad, not {verdict!r}")
+        self.store.add_feedback([{"job_id": job_id, "verdict": verdict, "received_at": now_iso(),
+                                  "message_id": f"tracker:{uuid.uuid4()}"}])
+
+    def apply_verdicts(self, rows: list[dict]) -> int:
+        """New `applied` verdicts (the email button) become applications dated by the email, unless the job is
+        already tracked as open. Returns how many were added."""
+        added = 0
+        for r in rows:
+            if r.get("verdict") == "applied" and self.open_for_job(r["job_id"]) is None:
+                added += self.add_from_job(r["job_id"], r["received_at"][:10]) is not None
+        return added

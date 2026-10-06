@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping
 from jobhunter.feedback import LABEL, parse_subject
 from jobhunter.notify import email_addresses
 from jobhunter.settings import NotifySettings
+from jobhunter.tracker.records import Applications
 
 _ALL_MAIL = "[Gmail]/All Mail"            # the English name; other languages are found by the \All attribute
 _LIST_RE = re.compile(rb'\((?P<flags>[^)]*)\) "[^"]*" "?(?P<name>[^"]+)"?$')
@@ -172,8 +173,13 @@ def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, 
         known = store.existing_ids([r["job_id"] for r in rows]) if rows else set()
         if any(r["job_id"] not in known for r in rows):
             summary.ignored["unknown job"] += sum(r["job_id"] not in known for r in rows)
-        for r in store.add_feedback([r for r in rows if r["job_id"] in known]):
+        new = store.add_feedback([r for r in rows if r["job_id"] in known])
+        for r in new:
             summary.saved[r["verdict"]] += 1
+        try:
+            Applications(store).apply_verdicts(new)     # ✅ Applied from an email becomes a tracked application
+        except Exception as e:
+            log(f"feedback: could not add the applied job(s) to the tracker ({type(e).__name__})")
         # Labelled only after saving: if this fails, the next run finds them again and the unique message id
         # keeps them from being saved twice. Ignored messages are labelled too, so they are not checked every run.
         conn.create(f'"{LABEL}"')                          # NO when the label exists; harmless

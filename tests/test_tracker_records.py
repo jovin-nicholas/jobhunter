@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jobhunter.models import Job, ScoreResult
@@ -136,3 +137,47 @@ class TestIsoDate(unittest.TestCase):
         for bad in ("10/05/2026", "", "soon", None):
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 iso_date(bad)
+
+
+class TestReviewQueue(unittest.TestCase):
+    def setUp(self):
+        self.store = new_store()
+        self.apps = Applications(self.store)
+        for i, name in enumerate(("Acme", "Globex", "Initech", "Hooli", "Umbrella")):
+            self.store.save(Job(f"dice_{i}", "Software Engineer", name, "Remote", f"https://e.example/{i}",
+                                source="dice"), "notified")
+        self.store.save(Job("dice_9", "Software Engineer", "Vandelay", "Remote", "https://e.example/9"), "logged")
+
+    def ids(self):
+        return [r["job_id"] for r in self.apps.review_queue(14)]
+
+    def test_recent_notified_jobs_newest_first(self):
+        self.assertEqual(self.ids(), ["dice_4", "dice_3", "dice_2", "dice_1", "dice_0"])
+
+    def test_applied_bad_and_hidden_jobs_leave_the_queue(self):
+        self.apps.add_from_job("dice_0", "2026-10-01")
+        self.apps.record_verdict("dice_1", "bad")
+        self.apps.hide_from_review("dice_2")
+        self.assertEqual(self.ids(), ["dice_4", "dice_3"])
+
+    def test_jobs_older_than_review_days_are_left_out(self):
+        later = datetime.now(timezone.utc) + timedelta(days=15)
+        self.assertEqual(self.apps.review_queue(14, now=later), [])
+
+    def test_verdicts_are_feedback_rows_export_feedback_reads(self):
+        self.apps.record_verdict("dice_3", "applied")
+        rows = self.store.latest_feedback()
+        self.assertEqual([(r["job_id"], r["verdict"], r["decision"]) for r in rows], [("dice_3", "applied", "notify")])
+        with self.assertRaises(ValueError):
+            self.apps.record_verdict("dice_3", "maybe later")
+
+
+class TestApplyVerdicts(unittest.TestCase):
+    def test_an_applied_verdict_becomes_one_application(self):
+        store = new_store()
+        acme(store)
+        apps = Applications(store)
+        row = {"job_id": "dice_1", "verdict": "applied", "received_at": "2026-10-05T10:00:00+00:00"}
+        self.assertEqual(apps.apply_verdicts([row, {**row, "verdict": "good"}]), 1)
+        self.assertEqual(apps.apply_verdicts([row]), 0)                          # already open: no second one
+        self.assertEqual([(a["job_id"], a["applied_at"]) for a in apps.all()], [("dice_1", "2026-10-05")])

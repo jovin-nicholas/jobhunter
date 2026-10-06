@@ -262,6 +262,22 @@ class TestAuthenticationResults(InboxTestCase):
         self.assertIn("2 message(s)", notes[0])
 
 
+class TestAppliedBecomesAnApplication(InboxTestCase):
+    def test_an_applied_email_is_tracked_once_even_across_runs(self):
+        from jobhunter.tracker.records import Applications
+        for _ in range(2):
+            self.read(FakeImap({"11": header("sender@example.com", "jh:applied:dice_1")}))
+        apps = Applications(self.store).all()
+        self.assertEqual([(a["job_id"], a["stage"], a["applied_at"]) for a in apps], [("dice_1", "applied", "2026-10-05")])
+
+    def test_marking_applied_in_the_tracker_first_still_gives_one_application(self):
+        from jobhunter.tracker.records import Applications
+        apps = Applications(self.store)
+        apps.add_from_job("dice_1", "2026-10-04")
+        apps.record_verdict("dice_1", "applied")
+        self.read(FakeImap({"11": header("sender@example.com", "jh:applied:dice_1")}))
+        self.assertEqual(len(Applications(self.store).all()), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
