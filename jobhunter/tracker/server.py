@@ -166,6 +166,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         if method == "POST" and path == "/api/review":
             return self._json(200, self._review(body, today))
+        if method == "POST" and path == "/api/review/undo":
+            self._review_undo(body)
+            return self._json(200, {"ok": True})
         return self._json(404, {"error": "not found"})
 
     def _quick_add(self, body: dict, today: date) -> int:
@@ -202,20 +205,40 @@ class _Handler(BaseHTTPRequestHandler):
         return ids
 
     def _review(self, body: dict, today: date) -> dict:
+        """What undo needs: the label's message_id, and the application with whether this action created it."""
         apps, job_id, action = self.server.apps, str(body.get("job_id") or ""), body.get("action")
         if action == "applied":
-            app_id = apps.open_for_job(job_id) or apps.add_from_job(job_id, today.isoformat())
+            app_id = apps.open_for_job(job_id)
+            created = app_id is None
+            if created:
+                app_id = apps.add_from_job(job_id, today.isoformat())
             if app_id is None:
                 raise ValueError(f"unknown job {job_id!r}")
-            apps.record_verdict(job_id, "applied")
-            return {"id": app_id}
+            return {"message_id": apps.record_verdict(job_id, "applied"), "id": app_id, "created": created}
         if action == "bad":
-            apps.record_verdict(job_id, "bad")
-            return {"ok": True}
+            return {"message_id": apps.record_verdict(job_id, "bad"), "id": None, "created": False}
         if action == "hide":
             apps.hide_from_review(job_id)
-            return {"ok": True}
+            return {"message_id": None, "id": None, "created": False}
         raise ValueError(f"unknown action {action!r} (applied, bad or hide)")
+
+    def _review_undo(self, body: dict) -> None:
+        """Undo of a review action: {message_id, id?} for a or b, {job_id} for hide. The application goes only when
+        it is the label's own job and still holds nothing but its "applied" event, so this never becomes a delete."""
+        apps, message_id = self.server.apps, body.get("message_id")
+        if not message_id:
+            if not body.get("job_id"):
+                raise ValueError("nothing to undo")
+            return apps.unhide(str(body["job_id"]))
+        job_id = apps.verdict_job(str(message_id))
+        app_id = int(body["id"]) if body.get("id") is not None else None
+        if app_id is not None:
+            app = apps.get(app_id)
+            if app is None or job_id is None or app["job_id"] != job_id or len(app["events"]) != 1:
+                raise ValueError("that application was not just added by this label, so it stays")
+        apps.delete_verdict(str(message_id))
+        if app_id is not None:
+            apps.delete_application(app_id)
 
 
 def serve(apps: Applications, settings: TrackerSettings, *, port: int, http: Any, open_browser: bool,

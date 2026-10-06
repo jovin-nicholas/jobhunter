@@ -268,12 +268,39 @@ class Applications:
         with self.store.connect() as conn:
             conn.execute("INSERT OR IGNORE INTO review_hidden (job_id, hidden_at) VALUES (?, ?)", (job_id, now_iso()))
 
-    def record_verdict(self, job_id: str, verdict: str) -> None:
-        """A training label from the tracker (a or b), saved like an email verdict so export-feedback reads it."""
+    def unhide(self, job_id: str) -> None:
+        with self.store.connect() as conn:
+            conn.execute("DELETE FROM review_hidden WHERE job_id = ?", (job_id,))
+
+    def record_verdict(self, job_id: str, verdict: str) -> str:
+        """A training label from the tracker (a or b), saved like an email verdict so export-feedback reads it.
+        Returns its message_id, which undo passes back."""
         if verdict not in ("applied", "bad") or verdict not in VERDICTS:
             raise ValueError(f"the tracker records only applied or bad, not {verdict!r}")
+        message_id = f"tracker:{uuid.uuid4()}"
         self.store.add_feedback([{"job_id": job_id, "verdict": verdict, "received_at": now_iso(),
-                                  "message_id": f"tracker:{uuid.uuid4()}"}])
+                                  "message_id": message_id}])
+        return message_id
+
+    def verdict_job(self, message_id: str) -> str | None:
+        """The job a tracker label is about; ValueError for a label from an email, which the tracker never undoes."""
+        if not str(message_id or "").startswith("tracker:"):
+            raise ValueError("only a label made in the tracker can be undone")
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT job_id FROM feedback WHERE message_id = ?", (message_id,)).fetchone()
+        return row[0] if row else None
+
+    def delete_verdict(self, message_id: str) -> None:
+        """Undo of a review a or b: the tracker's own label goes; an email's label is refused."""
+        self.verdict_job(message_id)
+        with self.store.connect() as conn:
+            conn.execute("DELETE FROM feedback WHERE message_id = ?", (message_id,))
+
+    def delete_application(self, app_id: int) -> None:
+        """Only for undoing a review a that created this application; there is no general delete."""
+        with self.store.connect() as conn:
+            conn.execute("DELETE FROM application_events WHERE application_id = ?", (app_id,))
+            conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
 
     def apply_verdicts(self, rows: list[dict]) -> int:
         """New `applied` verdicts (the email button) become applications dated by the email, unless the job is

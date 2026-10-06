@@ -41,6 +41,9 @@ class TestPage(unittest.TestCase):
         self.assertTrue(re.search(r'id: "follow-up"[^\n]*\n\s*on: \{blur:', self.text), "follow-up saves on blur")
         self.assertIn('kind === "date" ? "blur" : "change"', self.text)
 
+    def test_a_review_action_can_be_undone(self):
+        self.assertIn('"/api/review/undo"', self.text)
+
     def test_it_follows_the_colour_scheme_and_reduced_motion(self):
         self.assertIn("prefers-color-scheme: dark", self.text)
         self.assertIn("prefers-reduced-motion", self.text)

@@ -135,6 +135,55 @@ class TestApi(ServerTestCase):
         self.assertEqual((app["applied_at"], app["stage"], app["follow_up_at"], len(app["events"])),
                          ("2026-10-01", "applied", None, 1))
 
+    def review(self, action):
+        status, _, body = self.call("POST", "/api/review", {"job_id": "dice_1", "action": action})
+        self.assertEqual(status, 200)
+        return json.loads(body)
+
+    def queue(self):
+        return [r["job_id"] for r in json.loads(self.call("GET", "/api/state")[2])["review"]]
+
+    def test_undo_of_a_bad_match_removes_the_label_and_the_job_is_back_to_review(self):
+        r = self.review("bad")
+        self.assertEqual((r["id"], r["created"]), (None, False))
+        self.assertEqual(self.queue(), [])
+        self.assertEqual(self.call("POST", "/api/review/undo", {"message_id": r["message_id"]})[0], 200)
+        self.assertEqual(self.store.latest_feedback(), [])
+        self.assertEqual(self.queue(), ["dice_1"])
+
+    def test_undo_of_applied_removes_the_application_it_created_and_the_label(self):
+        r = self.review("applied")
+        self.assertTrue(r["created"])
+        self.assertEqual(self.call("POST", "/api/review/undo", {"message_id": r["message_id"], "id": r["id"]})[0], 200)
+        self.assertEqual((self.apps.all(), self.store.latest_feedback(), self.queue()), ([], [], ["dice_1"]))
+
+    def test_undo_of_applied_keeps_an_application_it_did_not_create(self):
+        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
+        r = self.review("applied")
+        self.assertEqual((r["id"], r["created"]), (app_id, False))
+        self.call("POST", "/api/review/undo", {"message_id": r["message_id"]})
+        self.assertEqual([a["id"] for a in self.apps.all()], [app_id])
+        self.assertEqual(self.store.latest_feedback(), [])
+
+    def test_undo_never_deletes_an_application_that_is_not_the_labels_own(self):
+        other = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
+        r = self.review("bad")
+        self.assertEqual(self.call("POST", "/api/review/undo", {"message_id": r["message_id"], "id": other})[0], 400)
+        self.assertEqual([a["id"] for a in self.apps.all()], [other])
+
+    def test_undo_of_hide_shows_the_job_again(self):
+        r = self.review("hide")
+        self.assertEqual(self.queue(), [])
+        self.assertEqual(self.call("POST", "/api/review/undo", {"job_id": "dice_1"})[0], 200)
+        self.assertEqual(self.queue(), ["dice_1"])
+        self.assertEqual(r["message_id"], None)
+
+    def test_undo_refuses_a_label_that_is_not_the_trackers(self):
+        self.store.add_feedback([{"job_id": "dice_1", "verdict": "good", "received_at": "2026-10-05T10:00:00+00:00",
+                                  "message_id": "<m1@mail.example.com>"}])
+        self.assertEqual(self.call("POST", "/api/review/undo", {"message_id": "<m1@mail.example.com>"})[0], 400)
+        self.assertEqual([r["verdict"] for r in self.store.latest_feedback()], ["good"])
+
     def test_edit_and_description(self):
         app_id = self.apps.add_from_job("dice_1", "2026-10-01")
         self.assertEqual(self.call("POST", f"/api/applications/{app_id}", {"notes": "Call Friday"})[0], 200)

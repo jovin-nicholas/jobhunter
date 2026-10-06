@@ -334,8 +334,10 @@ async function showDescription(id, button) {
 function closeDrawer() { openId = null; render(); }
 
 async function act(path, body, message) {
-  try { const r = await api("POST", path, body); await refresh(); if (r.event_ids) toast(message, r.event_ids); }
-  catch (e) { toast(`Failed: ${e.message}`); }
+  try {
+    const r = await api("POST", path, body); await refresh();
+    if (r.event_ids && r.event_ids.length) toast(message, () => api("POST", "/api/events/delete", {ids: r.event_ids}));
+  } catch (e) { toast(`Failed: ${e.message}`); }
 }
 function setStage(id, stage) {
   const on = document.getElementById("stage-on"), at = on && on.value;
@@ -346,15 +348,19 @@ async function review(jobId, action) {
   try {
     const r = await api("POST", "/api/review", {job_id: jobId, action});
     await refresh();
-    toast(action === "applied" ? "Marked applied" : action === "bad" ? "Marked a bad match" : "Hidden");
+    const undo = r.message_id ? {message_id: r.message_id, id: r.created ? r.id : undefined} : {job_id: jobId};
+    toast(action === "applied" ? "Marked applied" : action === "bad" ? "Marked a bad match" : "Hidden",
+          () => api("POST", "/api/review/undo", undo));
     if (action === "applied" && r.id) { openId = r.id; render(); }
   } catch (e) { toast(`Failed: ${e.message}`); }
 }
-function toast(message, undoIds) {
+function toast(message, undo) {
   const box = document.getElementById("toast");
   clearTimeout(toastTimer);
-  box.replaceChildren(...kids(el("span", {}, message), undoIds && undoIds.length ? el("button", {type: "button", on: {click: async () => {
-    box.hidden = true; await api("POST", "/api/events/delete", {ids: undoIds}); await refresh(); }}}, "Undo") : null));
+  box.replaceChildren(...kids(el("span", {}, message), undo ? el("button", {type: "button", on: {click: async () => {
+    box.hidden = true;
+    try { await undo(); } catch (e) { toast(`Not undone: ${e.message}`); }
+    await refresh(); }}}, "Undo") : null));
   box.hidden = false;
   toastTimer = setTimeout(() => { box.hidden = true; }, 6000);
 }

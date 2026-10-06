@@ -206,6 +206,33 @@ class TestReviewQueue(unittest.TestCase):
             self.apps.record_verdict("dice_3", "maybe later")
 
 
+class TestVerdictUndo(unittest.TestCase):
+    def test_only_a_tracker_label_can_be_deleted(self):
+        store = new_store()
+        apps = Applications(store)
+        message_id = apps.record_verdict("dice_1", "bad")
+        self.assertTrue(message_id.startswith("tracker:"))
+        store.add_feedback([{"job_id": "dice_2", "verdict": "bad", "received_at": "2026-10-05T10:00:00+00:00",
+                             "message_id": "<m1@mail.example.com>"}])
+        with self.assertRaises(ValueError):
+            apps.delete_verdict("<m1@mail.example.com>")
+        apps.delete_verdict(message_id)
+        self.assertEqual([r["job_id"] for r in store.latest_feedback()], ["dice_2"])
+
+    def test_unhide_and_delete_application(self):
+        store = new_store()
+        acme(store)
+        apps = Applications(store)
+        apps.hide_from_review("dice_1")
+        apps.unhide("dice_1")
+        self.assertEqual([r["job_id"] for r in apps.review_queue(14)], ["dice_1"])
+        app_id = apps.add_from_job("dice_1", "2026-10-01")
+        apps.delete_application(app_id)
+        self.assertEqual(apps.all(), [])
+        with closing(sqlite3.connect(store.path)) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM application_events").fetchone()[0], 0)
+
+
 class TestApplyVerdicts(unittest.TestCase):
     def test_an_applied_verdict_becomes_one_application(self):
         store = new_store()
