@@ -38,8 +38,11 @@ def attention(app: dict, today: date, settings: TrackerSettings) -> tuple[int, s
     if app["stage"] == "offer":
         return 0, "offer", None
     soon = today + timedelta(days=SOON_DAYS)
+    # Only a screen or interview scheduled ahead (dated after the day it was entered) is upcoming: one logged today
+    # for today has already happened.
     upcoming = sorted((e["at"], e["value"]) for e in app["events"] if e["kind"] == "stage"
-                      and e["value"] in ("screen", "interview") and today <= date.fromisoformat(e["at"]) <= soon)
+                      and e["value"] in ("screen", "interview") and e["at"] > (e.get("created_at") or "")[:10]
+                      and today <= date.fromisoformat(e["at"]) <= soon)
     if upcoming:
         at, value = upcoming[0]
         return 1, value, at

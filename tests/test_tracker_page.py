@@ -30,6 +30,10 @@ class TestPage(unittest.TestCase):
         self.assertTrue(uses)
         self.assertEqual(len(re.findall(r"href:\s*safeHref\(", self.text)), len(uses))
 
+    def test_a_stage_can_be_dated(self):
+        self.assertIn('id: "stage-on"', self.text)                     # the drawer's optional "on" date
+        self.assertRegex(self.text, r"function setStage\(id, stage\) \{[^\n]*stage-on")
+
     def test_it_follows_the_colour_scheme_and_reduced_motion(self):
         self.assertIn("prefers-color-scheme: dark", self.text)
         self.assertIn("prefers-reduced-motion", self.text)

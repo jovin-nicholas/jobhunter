@@ -66,6 +66,7 @@ kbd { font-size: 11px; color: var(--muted); }
 .edit.big { font-size: 18px; font-weight: 600; }
 .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
 .stages button.on { border-color: var(--accent); color: var(--accent); }
+.stages .on-date { color: var(--muted); font-size: 12px; } .stages .on-date input { border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); padding: 1px 4px; }
 label.field { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
 label.field input, label.field textarea { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); color: var(--ink); }
 textarea { min-height: 90px; resize: vertical; }
@@ -300,7 +301,8 @@ function renderDrawer() {
     el("p", {class: "eyebrow"}, [a.board, a.fit, a.resume_id && `resume: ${a.resume_id}`].filter(Boolean).join(" · ")),
     editable(a, "company", "edit big", "Company"), editable(a, "title", "edit", "Title"),
     safeHref(a.url) ? el("p", {}, el("a", {href: safeHref(a.url), target: "_blank", rel: "noopener noreferrer"}, "Open the posting ↗")) : null,
-    el("div", {class: "stages"}, stages),
+    el("div", {class: "stages"}, stages,
+       el("label", {class: "on-date"}, "on ", el("input", {type: "date", id: "stage-on", "aria-label": "Stage date (empty: today)"}))),
     el("label", {class: "field"}, "Follow up on", follow),
     a.follow_up_at ? el("button", {type: "button", class: "small", on: {click: () => act(`/api/applications/${a.id}/follow-up`, {done: true}, "Follow-up done")}},
                         el("kbd", {}, "d"), " done") : null,
@@ -331,7 +333,7 @@ async function act(path, body, message) {
   try { const r = await api("POST", path, body); await refresh(); if (r.event_ids) toast(message, r.event_ids); }
   catch (e) { toast(`Failed: ${e.message}`); }
 }
-function setStage(id, stage) { return act(`/api/applications/${id}/stage`, {stage}, `Moved to ${stage}`); }
+function setStage(id, stage) { const on = document.getElementById("stage-on"), at = on && on.value; return act(`/api/applications/${id}/stage`, at ? {stage, at} : {stage}, `Moved to ${stage}`); }
 async function review(jobId, action) {
   try {
     const r = await api("POST", "/api/review", {job_id: jobId, action});

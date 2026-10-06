@@ -8,10 +8,12 @@ TODAY = date(2026, 10, 6)
 S = TrackerSettings()
 
 
-def app(i, stage="applied", applied="2026-10-01", follow_up=None, events=(), follow_ups=()):
-    evs = [{"kind": "stage", "value": "applied", "at": applied}] + [
-        {"kind": "stage", "value": v, "at": at} for v, at in events] + [
-        {"kind": kind, "value": value, "at": applied} for kind, value in follow_ups]
+def app(i, stage="applied", applied="2026-10-01", follow_up=None, events=(), follow_ups=(), created=None):
+    """`created` is when the events were recorded; by default the applied date, so later-dated stages are ahead."""
+    made = f"{created or applied}T09:00:00+00:00"
+    evs = [{"kind": "stage", "value": "applied", "at": applied, "created_at": made}] + [
+        {"kind": "stage", "value": v, "at": at, "created_at": made} for v, at in events] + [
+        {"kind": kind, "value": value, "at": applied, "created_at": made} for kind, value in follow_ups]
     return {"id": i, "company": f"Co{i}", "title": "Engineer", "stage": stage, "stage_at": evs[-1]["at"],
             "applied_at": applied, "follow_up_at": follow_up, "board": "dice", "resume_id": "", "fit_score": None,
             "events": evs}
@@ -34,6 +36,12 @@ class TestAttention(unittest.TestCase):
     def test_ghost_counts_from_the_last_event_not_the_application(self):
         self.assertIsNone(attention(app(8, applied="2026-08-01", follow_up=None,
                                         events=[("applied", "2026-09-20")]), TODAY, S))
+
+    def test_only_a_screen_or_interview_scheduled_ahead_is_upcoming(self):
+        ahead = app(14, "interview", events=[("interview", "2026-10-06")], created="2026-10-03")
+        self.assertEqual(attention(ahead, TODAY, S), (1, "interview", "2026-10-06"))
+        logged_today = app(15, "screen", applied="2026-10-02", events=[("screen", "2026-10-06")], created="2026-10-06")
+        self.assertIsNone(attention(logged_today, TODAY, S))
 
     def test_a_new_application_is_due_a_follow_up_after_the_applied_days(self):
         self.assertEqual(attention(app(9, applied="2026-09-29"), TODAY, S), (2, "follow up", "2026-10-06"))
