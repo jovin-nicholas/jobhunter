@@ -119,6 +119,15 @@ def _addresses(value: str) -> set[str]:
     return {addr.lower() for _, addr in getaddresses([value or ""]) if addr}
 
 
+def _track_applied(store: Any, log: Callable[[str], None]) -> None:
+    """✅ Applied from an email becomes a tracked application. A failure here never stops the inbox run, and the next
+    run makes it up, because the tracker reads the saved verdicts rather than this run's."""
+    try:
+        Applications(store).apply_verdicts()
+    except Exception as e:
+        log(f"feedback: could not add the applied job(s) to the tracker ({type(e).__name__}: {str(e)[:200]})")
+
+
 def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, log: Callable[[str], None] = print,
                   imap_factory: Callable[..., Any] = imaplib.IMAP4_SSL) -> FeedbackSummary:
     summary = FeedbackSummary()
@@ -142,6 +151,7 @@ def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, 
                    "search the inbox")
         uids = (data[0] or b"").decode().split() if data else []
         if not uids:
+            _track_applied(store, log)                  # makes up for a run whose tracker step failed
             return summary
         rows, unchecked, refused = [], 0, 0
         _, parts = conn.uid("FETCH", ",".join(uids), _HEADERS)
@@ -176,10 +186,7 @@ def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, 
         new = store.add_feedback([r for r in rows if r["job_id"] in known])
         for r in new:
             summary.saved[r["verdict"]] += 1
-        try:
-            Applications(store).apply_verdicts(new)     # ✅ Applied from an email becomes a tracked application
-        except Exception as e:
-            log(f"feedback: could not add the applied job(s) to the tracker ({type(e).__name__})")
+        _track_applied(store, log)
         # Labelled only after saving: if this fails, the next run finds them again and the unique message id
         # keeps them from being saved twice. Ignored messages are labelled too, so they are not checked every run.
         conn.create(f'"{LABEL}"')                          # NO when the label exists; harmless

@@ -302,11 +302,22 @@ class Applications:
             conn.execute("DELETE FROM application_events WHERE application_id = ?", (app_id,))
             conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
 
-    def apply_verdicts(self, rows: list[dict]) -> int:
-        """New `applied` verdicts (the email button) become applications dated by the email, unless the job is
-        already tracked as open. Returns how many were added."""
+    def apply_verdicts(self) -> int:
+        """Every stored job whose latest verdict is `applied` (the email button) and which has no application at all
+        becomes one, dated by that verdict. Read from the feedback table rather than from one run's new rows, so a run
+        that failed here is made up by the next. Returns how many were added."""
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT f.job_id, f.received_at FROM feedback f WHERE f.verdict = 'applied' "
+                "AND f.id = (SELECT g.id FROM feedback g WHERE g.job_id = f.job_id "
+                "ORDER BY g.received_at DESC, g.id DESC LIMIT 1) "
+                "AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = f.job_id) "
+                "AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = f.job_id) "
+                "ORDER BY f.received_at, f.id").fetchall()
         added = 0
-        for r in rows:
-            if r.get("verdict") == "applied" and self.open_for_job(r["job_id"]) is None:
-                added += self.add_from_job(r["job_id"], r["received_at"][:10]) is not None
+        for job_id, received_at in rows:
+            try:
+                added += self.add_from_job(job_id, received_at[:10]) is not None
+            except ValueError:
+                continue                        # an email dated out of range: the others still go in
         return added

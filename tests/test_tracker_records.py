@@ -234,11 +234,27 @@ class TestVerdictUndo(unittest.TestCase):
 
 
 class TestApplyVerdicts(unittest.TestCase):
-    def test_an_applied_verdict_becomes_one_application(self):
-        store = new_store()
-        acme(store)
-        apps = Applications(store)
-        row = {"job_id": "dice_1", "verdict": "applied", "received_at": "2026-10-05T10:00:00+00:00"}
-        self.assertEqual(apps.apply_verdicts([row, {**row, "verdict": "good"}]), 1)
-        self.assertEqual(apps.apply_verdicts([row]), 0)                          # already open: no second one
-        self.assertEqual([(a["job_id"], a["applied_at"]) for a in apps.all()], [("dice_1", "2026-10-05")])
+    def setUp(self):
+        self.store = new_store()
+        acme(self.store)
+        acme(self.store, job_id="dice_2", url="https://jobs.example.com/acme/2")
+        self.apps = Applications(self.store)
+
+    def verdict(self, job_id, verdict, day, n=1):
+        self.store.add_feedback([{"job_id": job_id, "verdict": verdict, "received_at": f"{day}T10:00:00+00:00",
+                                  "message_id": f"<m{n}@mail.example.com>"}])
+
+    def test_a_latest_applied_verdict_becomes_one_application(self):
+        self.verdict("dice_1", "applied", "2026-10-05")
+        self.verdict("dice_2", "applied", "2026-10-01", n=2)
+        self.verdict("dice_2", "good", "2026-10-02", n=3)                       # the latest verdict is not applied
+        self.assertEqual(self.apps.apply_verdicts(), 1)
+        self.assertEqual(self.apps.apply_verdicts(), 0)                          # already tracked: no second one
+        self.assertEqual([(a["job_id"], a["applied_at"]) for a in self.apps.all()], [("dice_1", "2026-10-05")])
+
+    def test_a_job_whose_application_was_closed_gets_no_second_one(self):
+        app_id = self.apps.add_from_job("dice_1", "2026-09-01")
+        self.apps.add_event(app_id, "stage", "rejected", "2026-09-20")
+        self.verdict("dice_1", "applied", "2026-10-05")
+        self.assertEqual(self.apps.apply_verdicts(), 0)
+        self.assertEqual([a["id"] for a in self.apps.all()], [app_id])

@@ -279,5 +279,19 @@ class TestAppliedBecomesAnApplication(InboxTestCase):
         self.assertEqual(len(Applications(self.store).all()), 1)
 
 
+    def test_a_tracker_failure_is_made_up_on_the_next_run(self):
+        from unittest import mock
+
+        from jobhunter.tracker.records import Applications
+        with mock.patch.object(Applications, "apply_verdicts", side_effect=RuntimeError("database is locked")):
+            self.read(FakeImap({"11": header("sender@example.com", "jh:applied:dice_1")}))
+        self.assertEqual(Applications(self.store).all(), [])
+        self.assertIn("feedback: could not add the applied job(s) to the tracker (RuntimeError: database is locked)",
+                      self.logs)
+        self.read(FakeImap({}))                                      # the message was labelled: nothing new
+        apps = Applications(self.store).all()
+        self.assertEqual([(a["job_id"], a["applied_at"]) for a in apps], [("dice_1", "2026-10-05")])
+
+
 if __name__ == "__main__":
     unittest.main()
