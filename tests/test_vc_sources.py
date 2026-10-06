@@ -166,5 +166,33 @@ class TestConsider(unittest.TestCase):
         self.assertIn("page format", failures[0])
 
 
+class TestFailuresReachTheSummary(unittest.TestCase):
+    """A VC board that could not be read is listed once in `failures`, whatever went wrong, for the run summary."""
+
+    def test_a_consider_board_failing_on_every_role_is_listed_once(self):
+        failures = []
+        cfg = {"boards": {"jobs.a16z.com": "a16z"}, "roles": ["software-engineer", "data-engineer", "ml-engineer"]}
+        consider_listings(Http(lambda m, u, kw: Resp(text="<html></html>")), cfg, CUT, lambda line: None,
+                          failures=failures)
+        self.assertEqual(len(failures), 1)
+
+    def test_a_consider_http_or_json_error_is_listed(self):
+        for resp in (Resp(status=503), Resp(text=flight_page([cjob(1, 2)])[:-40])):
+            with self.subTest(status=resp.status_code):
+                failures = []
+                consider_listings(Http(lambda m, u, kw, r=resp: r), TestConsider.CFG, CUT, lambda line: None,
+                                  failures=failures)
+                self.assertEqual(len(failures), 1)
+                self.assertIn("jobs.a16z.com", failures[0])
+
+    def test_a_getro_collection_that_fails_is_listed(self):
+        failures = []
+        found = getro_listings(Http(pages(status=500)), settings(), CUT, lambda key: False, lambda line: None,
+                               failures=failures)
+        self.assertEqual(found, [])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("Redpoint", failures[0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,13 +31,14 @@ def _web_url(value: Any) -> str:
 
 def getro_listings(http: Any, settings: dict, cutoff: datetime, is_cached: Callable[[str], bool],
                    log: Callable[[str], None], complete: Container[int] = (),
-                   finished: set[int] | None = None) -> list[VcListing]:
+                   finished: set[int] | None = None, failures: list[str] | None = None) -> list[VcListing]:
     """New listings of every collection, newest first; a collection stops at a page with nothing new.
 
     A cached job counts as seen for that stop only in the collections in `complete`, those a previous run read to a
     real stop: a run that failed or ran out of pages left older jobs unread below its cached ones, so the next run
     pages past what is cached until it reaches them. The collections this run reads to a real stop (an empty page, a
-    page reaching the cut-off, or one with nothing new) are added to `finished`."""
+    page reaching the cut-off, or one with nothing new) are added to `finished`. A collection that could not be read
+    is added to `failures`, for the run summary."""
     filters = {"job_functions": settings["job_functions"]}
     if settings.get("locations"):
         filters["searchable_locations"] = settings["locations"]
@@ -80,6 +81,8 @@ def getro_listings(http: Any, settings: dict, cutoff: datetime, is_cached: Calla
                     break
         except Exception as e:
             log(f"getro [{name}]: {e}")
+            if failures is not None:
+                failures.append(f"getro [{name}]: could not be read ({type(e).__name__})")
             continue
         if stopped and finished is not None:
             finished.add(cid)
@@ -98,10 +101,12 @@ def _flight_text(page: str) -> str:
 
 def consider_listings(http: Any, settings: dict, cutoff: datetime, log: Callable[[str], None],
                       failures: list[str] | None = None) -> list[VcListing]:
-    """The boards' newest jobs, read from data inside the Next.js page. A page without it (Consider changed its page)
-    is added to `failures` too, so the run summary shows it rather than only a log line."""
+    """The boards' newest jobs, read from data inside the Next.js page. A board that could not be read (an HTTP or
+    JSON error, or a page without the data: Consider changed its page) is added to `failures` once, so the run summary
+    shows it rather than only a log line."""
     found: list[VcListing] = []
     for host, name in settings["boards"].items():
+        failed: str | None = None                # the first reason this board could not be read, for `failures`
         for role in settings["roles"]:
             try:
                 resp = http.request("GET", f"https://{host}/jobs", params={"role": role})
@@ -110,13 +115,12 @@ def consider_listings(http: Any, settings: dict, cutoff: datetime, log: Callable
                 m = _JOBS_KEY.search(text)
                 if not m:
                     log(f"consider [{host}]: no job list found on the page")
-                    if failures is not None:
-                        failures.append(f"consider [{host}]: no job list on the page; its page format may have "
-                                        "changed")
+                    failed = failed or "no job list on the page; its page format may have changed"
                     continue
                 jobs, _ = json.JSONDecoder().raw_decode(text, m.end())
             except Exception as e:
                 log(f"consider [{host}]: {e}")
+                failed = failed or f"could not be read ({type(e).__name__})"
                 continue
             for j in jobs if isinstance(jobs, list) else []:
                 url = _web_url(j.get("apply_url")) if isinstance(j, dict) else ""
@@ -125,4 +129,6 @@ def consider_listings(http: Any, settings: dict, cutoff: datetime, log: Callable
                 found.append(VcListing(f"consider_{j['id']}", name, str(j.get("title") or "").strip(),
                                        str(j.get("company_name") or "").strip(), str(j.get("location") or ""), url,
                                        str(j.get("posted_at") or "")))
+        if failed and failures is not None:
+            failures.append(f"consider [{host}]: {failed}")
     return found

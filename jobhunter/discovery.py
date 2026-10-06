@@ -76,7 +76,7 @@ class Discovery:
             finished: set[int] = set()
             if self.settings.getro:
                 new += getro_listings(self.http, self.settings.getro, cutoff, cached.__contains__, self.log,
-                                      complete=complete, finished=finished)
+                                      complete=complete, finished=finished, failures=self.failures)
             if self.settings.consider:
                 new += consider_listings(self.http, self.settings.consider, cutoff, self.log, self.failures)
             for listing in new:
