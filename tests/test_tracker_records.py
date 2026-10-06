@@ -81,6 +81,18 @@ class TestApplications(unittest.TestCase):
         self.assertEqual(app["events"][0]["at"], "2026-09-28")
         self.assertEqual((app["notes"], app["people"]), ("Referred by a friend", "Jane at Globex, recruiter"))
 
+    def test_the_current_stage_is_the_last_one_set_not_the_latest_dated(self):
+        imported = self.apps.add(title="Platform Engineer", company="Globex", applied_at="2026-09-01", stage="interview")
+        self.apps.update(imported, applied_at="2026-09-10")             # the date edit must not undo the interview
+        self.assertEqual((self.apps.get(imported)["stage"], self.apps.get(imported)["stage_at"]),
+                         ("interview", "2026-09-01"))
+        app_id = self.apps.add(title="Backend Engineer", company="Acme", applied_at="2026-10-01")
+        self.apps.add_event(app_id, "stage", "interview", "2026-10-09")  # scheduled ahead
+        rejected = self.apps.add_event(app_id, "stage", "rejected", "2026-10-06")
+        self.assertEqual((self.apps.get(app_id)["stage"], self.apps.get(app_id)["stage_at"]), ("rejected", "2026-10-06"))
+        self.apps.delete_events([rejected])                               # undo goes back by the order of actions
+        self.assertEqual((self.apps.get(app_id)["stage"], self.apps.get(app_id)["stage_at"]), ("interview", "2026-10-09"))
+
     def test_reapplying_to_a_job_makes_a_second_application(self):
         acme(self.store)
         first = self.apps.add_from_job("dice_1", "2026-09-01")

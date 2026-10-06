@@ -55,10 +55,11 @@ def url_key(url: str) -> str:
 
 
 def _refresh(conn: Any, app_id: int) -> None:
-    """Rewrite the cached stage and follow-up from the events, so they always match the timeline."""
+    """Rewrite the cached stage and follow-up from the events, so they always match the timeline. The stage is the
+    last one set (by id), not the latest dated: editing a date, or dating a stage ahead, never undoes a later move."""
     applied_at = conn.execute("SELECT applied_at FROM applications WHERE id = ?", (app_id,)).fetchone()[0]
     stage = conn.execute("SELECT value, at FROM application_events WHERE application_id = ? AND kind = 'stage' "
-                         "ORDER BY at DESC, id DESC LIMIT 1", (app_id,)).fetchone() or ("applied", applied_at)
+                         "ORDER BY id DESC LIMIT 1", (app_id,)).fetchone() or ("applied", applied_at)
     follow = conn.execute("SELECT kind, value FROM application_events WHERE application_id = ? AND kind IN "
                           "('follow_up_set', 'follow_up_done') ORDER BY id DESC LIMIT 1", (app_id,)).fetchone()
     follow_up = follow[1] if follow and follow[0] == "follow_up_set" else None
