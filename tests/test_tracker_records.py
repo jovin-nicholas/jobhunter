@@ -93,6 +93,13 @@ class TestApplications(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.apps.add_event(app_id, "stage", "rejected", "2026-10-08")
 
+    def test_update_refuses_an_empty_company(self):
+        app_id = self.apps.add(title="Backend Engineer", company="Acme", applied_at="2026-10-01")
+        for blank in ("", "   ", None):
+            with self.subTest(company=blank), self.assertRaises(ValueError):
+                self.apps.update(app_id, company=blank, notes="kept?")
+        self.assertEqual((self.apps.get(app_id)["company"], self.apps.get(app_id)["notes"]), ("Acme", None))
+
     def test_update_edits_fields_and_moves_the_first_applied_event(self):
         app_id = self.apps.add(title="", company="", applied_at="2026-10-01")
         self.apps.update(app_id, title=" Platform Engineer ", company="Globex", applied_at="2026-09-28",

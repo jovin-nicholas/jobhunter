@@ -148,6 +148,8 @@ class Applications:
         if unknown:
             raise ValueError(f"not editable: {', '.join(sorted(unknown))}")
         values = {k: str(v if v is not None else "").strip() for k, v in fields.items()}
+        if "company" in values and not values["company"]:
+            raise ValueError("the company cannot be empty")
         if "applied_at" in values:
             values["applied_at"] = event_date(values["applied_at"], self.today())
         if "url" in values:
