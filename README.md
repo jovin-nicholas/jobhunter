@@ -166,7 +166,7 @@ are in [docs/settings.md](docs/settings.md).
 
 All 13 built-in boards run unless `boards:` lists others: `dice`, `linkedin`, `industry_jobs` (dev.to),
 `top_companies` (Amazon, SoFi, Stripe), `hydepark`, and the ATS boards `greenhouse`, `lever`, `ashby`, `workday`,
-`dover`, `adp` and `gem`, which read postings found by discovery in the public job lists. Greenhouse, Lever, Ashby,
+`dover`, `adp` and `gem`, which read postings found by discovery in the public job lists, and `vc_boards` (below). Greenhouse, Lever, Ashby,
 Gem and ADP can also list whole company boards: `greenhouse: {companies: [stripe, airbnb]}`; Dover also reads its
 public feed of every company's jobs (`job_board: true`). With `discovery.getro` or `discovery.consider` set, VC portfolio job boards (Redpoint, Accel,
 a16z, ...) add their startups' jobs: a Greenhouse, Lever, Ashby, Workday, Gem, Dover or ADP link goes to that board when
@@ -237,7 +237,7 @@ once the posting page gave no text for more than 6 hours or its URL is on a host
 reading (e.g. Indeed).
 
 A job is notified once: the same title at the same company counts as one job whatever board, id or location it comes
-with.
+with. The company is matched as each board names it (see Known limitations).
 
 ## Feedback
 
@@ -267,6 +267,8 @@ To try it: `send-test-alert`, tap a button on your phone and send, `run --only <
 
 - The same posting found on two boards (for example Stripe through `top_companies` and through `greenhouse`) is two
   jobs, and Workday job ids do not include the company; both keep job ids identical to job-notifier's.
+- Lever and Ashby name a company by its board's address (`scaleai`), other boards by its display name ("Scale AI"),
+  so the same role found on Lever or Ashby and on another board can be notified twice.
 - A site's DNS answer is checked before a page download but could change in between (DNS rebinding); for a
   single-user tool this is accepted.
 - A feedback email that Gmail added no `Authentication-Results` header to (one you sent to yourself may have none) is

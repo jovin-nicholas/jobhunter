@@ -7,7 +7,8 @@ from typing import Any, Callable
 
 @dataclass
 class Job:
-    id: str                       # prefixed with the board name, e.g. "dice_<id>"
+    id: str                       # unique across boards: usually the board name and its id ("dice_<id>"); some keep
+                                  # job-notifier's ("devto_", "top_amazon_") or name the source ("getro_", "consider_")
     title: str
     company: str
     location: str
@@ -94,10 +95,10 @@ class SearchContext:
     mark_stale: Callable[[str], None] = _forget
     # Records a discovered posting that no longer exists (404/410, or a page without the job), so it is not requested again.
     mark_gone: Callable[[str], None] = _forget
-    # The ATS boards that read discovered links this run (enabled, picked by --only, discover on); None: not known,
     # Records a detail call that answered with no posting (null, or no title): a hiccup or a closed posting. It is
     # requested again on later runs, and remembered as gone once it has answered empty for RETRY_HOURS.
     mark_empty: Callable[[str], None] = _forget
+    # The ATS boards that read discovered links this run (enabled, picked by --only, discover on); None: not known,
     # taken as every ATS board.
     discovering: frozenset[str] | set[str] | None = None
     # The run's data folder (settings.data_dir), for a board that needs a private working folder; None: not known.

@@ -1,5 +1,6 @@
 """Optional cloud scorers: Google Gemini and Groq. Both have free tiers and need an API key in .env; nothing else in
-jobhunter needs them. They are asked the same prompt as the local Ollama scorer."""
+jobhunter needs them. They are asked the local Ollama scorer's prompt, with more of the description by default
+(max_description_chars 3000, against Ollama's 2000)."""
 from __future__ import annotations
 
 import os
@@ -116,11 +117,11 @@ class CloudScorer:
             self.pacer.wait()
             try:
                 resp = self._post(self.keys.keys[index], prompt, json_mode)
-            except requests.RequestException as e:
             except requests.ConnectionError as e:      # also ConnectTimeout
                 raise ScorerUnavailable(f"{self.provider} not reachable ({type(e).__name__})") from None
             except requests.Timeout as e:              # connected, but no answer in time
                 raise ScorerBusy(f"{self.provider} did not answer in time ({type(e).__name__})") from None
+            except requests.RequestException as e:
                 # The exception text can include the request URL; only its type is reported.
                 raise ScorerUnavailable(f"{self.provider} not reachable ({type(e).__name__})") from None
             if resp.status_code == 429:
