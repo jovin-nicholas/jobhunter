@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from jobhunter.boards.ats_urls import Posting, ats_of, parse, postings
-from jobhunter.boards.common import is_fresh, parse_time
+from jobhunter.boards.common import is_fresh, parse_time, posted_iso
 from jobhunter.discovery import Discovery
 from jobhunter.settings import DiscoverySettings
 from tests.helpers import FakeResponse
@@ -381,6 +381,28 @@ class TestVcDiscovery(unittest.TestCase):
     def test_without_a_cache_path_nothing_is_written(self):
         self.discovery(FakeHttp(self.getro), cache=False).listings()
         self.assertFalse(self.cache.exists())
+
+
+class TestPostedIso(unittest.TestCase):
+    """Boards give posting dates as ISO text, Unix timestamps or "September 24, 2026"; jobs.db stores ISO text."""
+
+    def test_timestamps_and_long_dates_become_iso(self):
+        self.assertEqual(posted_iso("1790000000000"), "2026-09-21T14:13:20+00:00")
+        self.assertEqual(posted_iso(1790000000), "2026-09-21T14:13:20+00:00")
+        self.assertEqual(posted_iso("September 24, 2026"), "2026-09-24")
+
+    def test_iso_text_and_unreadable_text_are_kept(self):
+        for value in ("2026-09-29T11:07:49-04:00", "2026-09-28", "2026-09-11T12:40:12Z", "posted recently", ""):
+            with self.subTest(value=value):
+                self.assertEqual(posted_iso(value), value)
+        self.assertEqual(posted_iso(None), "")
+
+    def test_the_pipeline_stores_iso_dates(self):
+        from jobhunter.models import Job
+        from jobhunter.pipeline import _clean
+        job = Job("top_amazon_1", "SDE", "Amazon", "Seattle", "https://example.com/1", posted_at="September 24, 2026")
+        _clean(job)
+        self.assertEqual(job.posted_at, "2026-09-24")
 
 
 if __name__ == "__main__":

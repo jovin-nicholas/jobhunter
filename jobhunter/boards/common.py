@@ -34,6 +34,24 @@ def parse_time(value: Any) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+_LONG_DATE = re.compile(r"^[A-Za-z]+ +\d{1,2}, \d{4}$")         # "September 24, 2026" (Amazon)
+
+
+def posted_iso(value: Any) -> str:
+    """A posting date as jobs.db stores it: ISO text. A Unix timestamp (Lever) becomes UTC ISO and "September 24,
+    2026" a date; ISO text and text that is not a date are kept as given."""
+    if value is None or value == "":
+        return ""
+    text = str(value).strip()
+    if isinstance(value, (int, float)) or text.isdigit():
+        when = parse_time(value)
+        return when.isoformat() if when else text
+    if _LONG_DATE.match(text):
+        when = parse_time(text)
+        return when.date().isoformat() if when else text
+    return str(value)
+
+
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$|^[A-Za-z]+ +\d{1,2}, \d{4}$")
 
 

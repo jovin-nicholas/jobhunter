@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from jobhunter import cover_letter
+from jobhunter.boards.common import posted_iso
 from jobhunter.discovery import ATS_BOARDS, Discovery
 from jobhunter.errors import BoardSkipped, SettingsError
 from jobhunter.filters import Filter, build_filters
@@ -152,8 +153,8 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
                         is_known=store.is_terminal,
                         mark_stale=(lambda job_id: None) if dry_run else store.mark_stale,
                         mark_gone=(lambda job_id: None) if dry_run else store.mark_gone,
-                        discovering=frozenset(name for name, b in boards.items() if _discovers(name, b)),
                         mark_empty=(lambda job_id: None) if dry_run else store.mark_empty,
+                        discovering=frozenset(name for name, b in boards.items() if _discovers(name, b)),
                         data_dir=app.settings.data_dir)
     if not s.fetch_descriptions:
         fetch_page = None
@@ -272,6 +273,7 @@ def _clean(job: Job) -> None:
         if f.type == "str":
             value = getattr(job, f.name)
             setattr(job, f.name, repair_text(value) if f.name in _REPAIRED else (value or ""))
+    job.posted_at = posted_iso(job.posted_at)       # one format in jobs.db, whatever the board gave
 
 
 def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, notifier: Any, counts: BoardSummary,
