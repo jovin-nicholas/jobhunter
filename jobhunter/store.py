@@ -43,6 +43,9 @@ class Store:
             conn.execute("CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                          "job_id TEXT NOT NULL, verdict TEXT NOT NULL, received_at TEXT NOT NULL, "
                          "message_id TEXT NOT NULL UNIQUE)")
+            # When a posting first answered empty (mark_empty); kept apart from `jobs` so its retry clock does not
+            # touch a job's first_run_at.
+            conn.execute("CREATE TABLE IF NOT EXISTS empty_answers (job_id TEXT PRIMARY KEY, first_at TEXT NOT NULL)")
 
     @contextmanager
     def _connect(self):
@@ -119,6 +122,16 @@ class Store:
     def mark_gone(self, job_id: str) -> None:
         """Remember a posting that no longer exists (404/410 or an empty page); an existing row is left as it is."""
         self._remember(job_id, "gone")
+
+    def mark_empty(self, job_id: str, within_hours: int = RETRY_HOURS) -> None:
+        """Remember that a posting's detail call answered with no posting; once it has answered empty for
+        `within_hours` it is remembered as gone."""
+        now = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            conn.execute("INSERT OR IGNORE INTO empty_answers (job_id, first_at) VALUES (?, ?)", (job_id, now.isoformat()))
+            first = conn.execute("SELECT first_at FROM empty_answers WHERE job_id = ?", (job_id,)).fetchone()[0]
+        if datetime.fromisoformat(first) <= now - timedelta(hours=within_hours):
+            self.mark_gone(job_id)
 
     def adopt_final(self, rows: list[dict]) -> int:
         """For stored jobs that are not finished, take the given row's status (and details) when that status is

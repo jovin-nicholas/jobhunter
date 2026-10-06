@@ -83,6 +83,7 @@ class DoverBoard:
                 return None
             if not isinstance(raw, dict) or not raw.get("title"):
                 ctx.log(f"dover [{company_hint}/{job_id}]: unexpected answer without a title; tried again next run")
+                ctx.mark_empty(key)
                 return None
             if not is_fresh(raw.get("created"), limit):
                 ctx.mark_stale(key)

@@ -58,8 +58,9 @@ class GemBoard:
                 ctx.log(f"gem [{slug}/{ext_id}]: failed: {e}")
                 return None
             if not isinstance(post, dict) or not post.get("title"):
-                # Gem answers a closed posting with null, but so might a hiccup; nothing here says closed for good.
+                # Gem answers a closed posting with null, but so might a hiccup: gone only once empty for a while.
                 ctx.log(f"gem [{slug}/{ext_id}]: no posting with a title in the answer; tried again next run")
+                ctx.mark_empty(key)
                 return None
             published = parse_time(post.get("firstPublishedTsSec"))
             if not is_fresh(post.get("firstPublishedTsSec"), limit):

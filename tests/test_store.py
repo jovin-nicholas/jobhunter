@@ -3,10 +3,11 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jobhunter.models import Job, ScoreResult, score_label
-from jobhunter.store import Store
+from jobhunter.store import RETRY_HOURS, Store
 from tests.helpers import status_counts
 
 
@@ -147,6 +148,37 @@ class TestFeedback(unittest.TestCase):
                          ("dice_1", "Backend Engineer", 8, ["go"], "backend.txt"))
         self.assertIsNone(Store(Path(tempfile.mkdtemp()) / "jobs.db").last_notified())
 
+
+class TestEmptyAnswers(unittest.TestCase):
+    """A board's detail call answering with no posting may be a hiccup or a closed posting: it is retried, and only
+    once the posting has answered empty for RETRY_HOURS is it remembered as gone."""
+
+    def setUp(self):
+        self.store = Store(Path(tempfile.mkdtemp()) / "jobs.db")
+
+    def age(self, job_id, hours):
+        when = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with closing(sqlite3.connect(self.store.path)) as conn, conn:
+            conn.execute("UPDATE empty_answers SET first_at = ? WHERE job_id = ?", (when, job_id))
+
+    def test_a_first_empty_answer_is_retried(self):
+        self.store.mark_empty("gem_a")
+        self.assertFalse(self.store.is_terminal("gem_a"))
+        self.store.mark_empty("gem_a")
+        self.assertFalse(self.store.is_terminal("gem_a"))
+
+    def test_empty_for_retry_hours_is_gone(self):
+        self.store.mark_empty("gem_a")
+        self.age("gem_a", RETRY_HOURS + 1)
+        self.store.mark_empty("gem_a")
+        self.assertTrue(self.store.is_terminal("gem_a"))
+        self.assertEqual(status_counts(self.store), {"gone": 1})
+
+    def test_an_empty_answer_leaves_no_jobs_row(self):
+        self.store.mark_empty("gem_a")
+        self.assertEqual(status_counts(self.store), {})
+        self.store.save(job("a"), "error_unavailable")
+        self.assertIsNotNone(self.store.first_saved_at("dice_a"))
 
 
 if __name__ == "__main__":

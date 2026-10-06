@@ -95,6 +95,9 @@ class SearchContext:
     # Records a discovered posting that no longer exists (404/410, or a page without the job), so it is not requested again.
     mark_gone: Callable[[str], None] = _forget
     # The ATS boards that read discovered links this run (enabled, picked by --only, discover on); None: not known,
+    # Records a detail call that answered with no posting (null, or no title): a hiccup or a closed posting. It is
+    # requested again on later runs, and remembered as gone once it has answered empty for RETRY_HOURS.
+    mark_empty: Callable[[str], None] = _forget
     # taken as every ATS board.
     discovering: frozenset[str] | set[str] | None = None
     # The run's data folder (settings.data_dir), for a board that needs a private working folder; None: not known.

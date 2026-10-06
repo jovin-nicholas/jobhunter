@@ -24,7 +24,9 @@ people. Every option, with its default, is in [docs/settings.md](docs/settings.m
 
 The first run takes longest: discovery finds about 1,500 ATS job links in the public job lists, and each posting is
 downloaded once. Postings older than `search.max_age_hours` (status `stale`) and postings that no longer exist
-(status `gone`) are then remembered and skipped. A dry run remembers nothing, so every dry run downloads them again.
+(status `gone`) are then remembered and skipped. A posting whose details come back empty (Gem, Dover, ADP) may be a
+hiccup, so it is asked for again on later runs and counts as `gone` once it has been empty for 24 hours. A dry run
+remembers nothing, so every dry run downloads them again.
 
 ## Running on a schedule
 
@@ -201,7 +203,8 @@ class MyBoard:
 An optional `enrich(job, ctx)` method can fetch a full description for new jobs only. `ctx` also has `http` (one
 polite session with retries), `discovery.urls()` (this run's ATS links), `is_known(job_id)` (already finished, so skip
 fetching it), `mark_stale(job_id)` (too old) and `mark_gone(job_id)` (no longer exists); both are skipped on later
-runs. A board class may set `default_timeout_s`, and may raise `BoardSkipped` when it cannot run on this machine.
+runs. `mark_empty(job_id)` records a details answer with no posting in it: the posting is asked for again, and becomes
+`gone` once it has answered empty for 24 hours. A board class may set `default_timeout_s`, and may raise `BoardSkipped` when it cannot run on this machine.
 
 Scorers work the same way with `@scorer("name")` and a `score(job, resume)` method returning a `ScoreResult`. A scorer
 that also has `generate(prompt) -> str` can write cover letters.

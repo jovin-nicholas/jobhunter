@@ -153,6 +153,7 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
                         mark_stale=(lambda job_id: None) if dry_run else store.mark_stale,
                         mark_gone=(lambda job_id: None) if dry_run else store.mark_gone,
                         discovering=frozenset(name for name, b in boards.items() if _discovers(name, b)),
+                        mark_empty=(lambda job_id: None) if dry_run else store.mark_empty,
                         data_dir=app.settings.data_dir)
     if not s.fetch_descriptions:
         fetch_page = None

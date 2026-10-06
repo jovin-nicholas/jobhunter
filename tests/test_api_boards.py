@@ -57,11 +57,12 @@ class Discovery:
         return set(self._urls)
 
 
-def cx(http, urls=(), known=(), logs=None, stale=None, gone=None):
+def cx(http, urls=(), known=(), logs=None, stale=None, gone=None, empty=None):
     return SearchContext(["swe"], ["Remote"], 72, http, (logs if logs is not None else []).append,
                          discovery=Discovery(urls), is_known=lambda job_id: job_id in known,
                          mark_stale=(stale if stale is not None else []).append,
-                         mark_gone=(gone if gone is not None else []).append)
+                         mark_gone=(gone if gone is not None else []).append,
+                         mark_empty=(empty if empty is not None else []).append)
 
 
 DOVER = "https://app.dover.com/api/v1"
@@ -148,12 +149,14 @@ class TestDover(unittest.TestCase):
         self.assertTrue(any("err" in line and "503" in line for line in logs), logs)
 
     def test_an_untitled_or_null_posting_is_logged_and_never_marked_gone(self):
-        gone, logs = [], []
+        gone, empty, logs = [], [], []
         http = Api({f"{DOVER}/inbound/application-portal-job/untitled": {"id": "untitled", "active": True},
                     f"{DOVER}/inbound/application-portal-job/null": None})
         urls = [f"https://app.dover.com/apply/moda/{i}" for i in ("untitled", "null")]
-        self.assertEqual(list(self.board(job_board=False).search(cx(http, urls, gone=gone, logs=logs))), [])
+        self.assertEqual(list(self.board(job_board=False).search(cx(http, urls, gone=gone, logs=logs,
+                                                                    empty=empty))), [])
         self.assertEqual(gone, [])
+        self.assertEqual(sorted(empty), ["dover_null", "dover_untitled"])     # gone once empty for long enough
         for job_id in ("untitled", "null"):
             self.assertTrue(any(job_id in line for line in logs), logs)
 
@@ -236,9 +239,11 @@ class TestGem(unittest.TestCase):
                 return super().__call__(operation, v)
         http = GemApi(post=Odd({"goodbill": ("Goodbill", {"live": (1, "Full Stack")})}))
         urls = [f"https://jobs.gem.com/goodbill/{i}" for i in ("live", "closed", "untitled")]
-        jobs = list(self.board().search(cx(http, urls, gone=gone, logs=logs)))
+        empty = []
+        jobs = list(self.board().search(cx(http, urls, gone=gone, logs=logs, empty=empty)))
         self.assertEqual([j.id for j in jobs], ["gem_live"])
         self.assertEqual(gone, [])
+        self.assertEqual(sorted(empty), ["gem_closed", "gem_untitled"])
         for ext_id in ("closed", "untitled"):
             self.assertTrue(any(ext_id in line for line in logs), logs)
 
@@ -332,9 +337,11 @@ class TestAdp(unittest.TestCase):
         http = Api({adp_detail("708187"): self.detail("708187"), adp_detail("999"): {"customFieldGroup": {}},
                     adp_detail("998"): None})
         urls = [link.format(i) for i in ("708187", "999", "998", "404")]
-        jobs = list(self.board().search(cx(http, urls, gone=gone, logs=logs)))
+        empty = []
+        jobs = list(self.board().search(cx(http, urls, gone=gone, logs=logs, empty=empty)))
         self.assertEqual([j.id for j in jobs], [f"adp_{CID}_708187"])
         self.assertEqual(gone, [f"adp_{CID}_404"])                  # a skeleton or null may be a hiccup: logged
+        self.assertEqual(sorted(empty), [f"adp_{CID}_998", f"adp_{CID}_999"])
         for job_id in ("999", "998"):
             self.assertTrue(any(job_id in line for line in logs), logs)
 
