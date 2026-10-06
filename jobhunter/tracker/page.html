@@ -352,13 +352,17 @@ function setStage(id, stage) {
   return act(`/api/applications/${id}/stage`, at ? {stage, at} : {stage}, `Moved to ${stage}`);
 }
 async function review(jobId, action) {
+  // The cursor moves on to the next row of the queue, by its key: rows above it shift when `a` adds an application.
+  const queue = visible.filter(v => v.type === "review"), at = queue.findIndex(v => v.job_id === jobId);
+  const after = queue[at + 1] || queue[at - 1], next = after ? after.job_id : null;
   try {
     const r = await api("POST", "/api/review", {job_id: jobId, action});
     await refresh();
+    const i = visible.findIndex(v => v.type === "review" && v.job_id === next);
+    if (i >= 0) { cursor = i; markCursor(); }
     const undo = r.message_id ? {message_id: r.message_id, id: r.created ? r.id : undefined} : {job_id: jobId};
     toast(action === "applied" ? "Marked applied" : action === "bad" ? "Marked a bad match" : "Hidden",
           () => api("POST", "/api/review/undo", undo));
-    if (action === "applied" && r.id) openDrawer(r.id);
   } catch (e) { toast(`Failed: ${e.message}`); }
 }
 function toast(message, undo) {

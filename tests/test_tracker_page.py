@@ -51,6 +51,11 @@ class TestPage(unittest.TestCase):
         self.assertNotRegex(self.text, r"openId = (a\.id|v\.id|t|r\.id);")          # every open goes through openDrawer
         self.assertEqual(self.text.count("openId = id;"), 1)
 
+    def test_after_a_review_action_the_cursor_stays_in_the_queue(self):
+        body = re.search(r"async function review\(jobId, action\) \{(.*?)\n\}", self.text, re.S).group(1)
+        self.assertNotIn("openDrawer", body)                              # no jump to the new application
+        self.assertIn('v.type === "review" && v.job_id === next', body)   # the next row, found by its key
+
     def test_it_follows_the_colour_scheme_and_reduced_motion(self):
         self.assertIn("prefers-color-scheme: dark", self.text)
         self.assertIn("prefers-reduced-motion", self.text)
