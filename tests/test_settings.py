@@ -213,3 +213,61 @@ class TestNotifyEmail(unittest.TestCase):
     def test_from_and_password_stay_required(self):
         found = self.problems("{from_env: GMAIL_ADDRESS}")
         self.assertTrue(any("missing password_env" in p for p in found), found)
+
+
+class TestVcDiscoverySettings(unittest.TestCase):
+    def load(self, discovery):
+        text = VALID + f"discovery:\n{discovery}"
+        return load_settings(write_project(Path(tempfile.mkdtemp()).resolve(), text, RESUMES),
+                             env={"SLACK_WEBHOOK_URL": "https://hooks.example/x"})
+
+    def problems(self, discovery):
+        with self.assertRaises(SettingsError) as e:
+            self.load(discovery)
+        return e.exception.problems
+
+    def test_getro_and_consider_parse_with_defaults(self):
+        s = self.load("  getro: {collections: {189: Redpoint, 1124: Primary}, locations: [United States]}\n"
+                      "  consider: {boards: {jobs.a16z.com: a16z}}\n")
+        self.assertEqual(s.discovery.getro, {"collections": {189: "Redpoint", 1124: "Primary"},
+                                             "job_functions": ["Software Engineering"], "locations": ["United States"],
+                                             "seniority": [], "max_pages": 10})
+        self.assertEqual(s.discovery.consider, {"boards": {"jobs.a16z.com": "a16z"}, "roles": ["software-engineer"]})
+
+    def test_hyde_park_read_twice_is_a_note_not_an_error(self):
+        from jobhunter.settings import settings_notes
+        text = VALID.replace("  dice: {}\n", "  dice: {}\n  hydepark: {}\n")
+        path = write_project(Path(tempfile.mkdtemp()).resolve(),
+                             text + "discovery:\n  getro: {collections: {112: Hyde Park, 189: Redpoint}}\n", RESUMES)
+        s = load_settings(path, env={"SLACK_WEBHOOK_URL": "https://hooks.example/x"})
+        notes = settings_notes(s)
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("112", notes[0])
+        self.assertIn("hydepark", notes[0])
+        self.assertEqual(settings_notes(self.load("  getro: {collections: {189: Redpoint}}\n")), [])
+        off = text.replace("  hydepark: {}\n", "  hydepark: {enabled: false}\n")
+        path = write_project(Path(tempfile.mkdtemp()).resolve(),
+                             off + "discovery:\n  getro: {collections: {112: Hyde Park}}\n", RESUMES)
+        self.assertEqual(settings_notes(load_settings(path, env={"SLACK_WEBHOOK_URL": "https://hooks.example/x"})), [])
+
+    def test_both_are_off_by_default(self):
+        s = self.load("  github_readmes: []\n")
+        self.assertIsNone(s.discovery.getro)
+        self.assertIsNone(s.discovery.consider)
+
+    def test_bad_values_are_reported(self):
+        for discovery, problem in (
+                ("  getro: {collections: {abc: X}}\n", "discovery.getro.collections"),
+                ("  getro: {collections: {}}\n", "discovery.getro.collections"),
+                ("  getro: {collections: {1: X}, max_pages: 0}\n", "discovery.getro.max_pages"),
+                ("  getro: {collections: {1: X}, colour: red}\n", "colour"),
+                ("  consider: {boards: {'https://jobs.a16z.com/jobs': a16z}}\n", "discovery.consider.boards"),
+                ("  consider: {boards: {jobs.a16z.com: a16z}, roles: []}\n", "discovery.consider.roles"),
+                ("  getro: {collections: {189: ''}}\n", "discovery.getro.collections"),
+                ("  getro: {collections: {189: '  '}}\n", "discovery.getro.collections"),
+                ("  consider: {boards: {jobs.a16z.com: 16}}\n", "discovery.consider.boards"),
+                ("  consider: {boards: {jobs.a16z.com: [a16z]}}\n", "discovery.consider.boards"),
+                ("  consider: {boards: {jobs.a16z.com: ''}}\n", "discovery.consider.boards")):
+            with self.subTest(discovery=discovery):
+                found = self.problems(discovery)
+                self.assertTrue(any(problem in p for p in found), found)

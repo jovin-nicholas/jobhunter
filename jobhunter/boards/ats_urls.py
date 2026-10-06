@@ -17,8 +17,9 @@ _PATTERNS = {
     "greenhouse": re.compile(r"^https?://(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io/([^/?#]+)/jobs/(\d+)"),
     "lever": re.compile(r"^https?://jobs(?:\.eu)?\.lever\.co/([^/?#]+)/([^/?#]+)"),
     "ashby": re.compile(r"^https?://jobs\.ashbyhq\.com/([^/?#]+)/([^/?#]+)"),
-    # app.dover.io/apply/<company>/<id> is Dover's usual public link; "apply" is not the company.
-    "dover": re.compile(r"^https?://(?:jobs|app)\.dover\.io/(?:apply/)?([^/?#]+)/([^/?#]+)"),
+    # Dover's links: app.dover.com/apply/<company>/<id> (app.dover.io redirects there), and the older
+    # jobs.dover.io/<company>/<id>; "apply" is not the company.
+    "dover": re.compile(r"^https?://(?:jobs\.dover\.io|app\.dover\.(?:io|com))/(?:apply/)?([^/?#]+)/([^/?#]+)"),
     "gem": re.compile(r"^https?://jobs\.gem\.com/([^/?#]+)/([^/?#]+)"),
 }
 _WORKDAY = re.compile(r"^https?://([^./]+)(?:\.[^./]+)?\.myworkdayjobs\.com(/[^?#]*)")
@@ -26,7 +27,7 @@ _WORKDAY = re.compile(r"^https?://([^./]+)(?:\.[^./]+)?\.myworkdayjobs\.com(/[^?
 _WORKDAY_SITE = re.compile(r"^https?://[^./]+\.myworkdaysite\.com/recruiting/([^/?#]+)(/[^?#]*)")
 _GREENHOUSE_EMBED = re.compile(r"^https?://(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io/embed/job_app\?")
 _ATS_HOSTS = {"greenhouse.io": "greenhouse", "lever.co": "lever", "ashbyhq.com": "ashby", "adp.com": "adp",
-              "myworkdayjobs.com": "workday", "myworkdaysite.com": "workday", "dover.io": "dover", "gem.com": "gem", "teamtailor.com": "teamtailor",
+              "myworkdayjobs.com": "workday", "myworkdaysite.com": "workday", "dover.io": "dover", "dover.com": "dover", "gem.com": "gem", "teamtailor.com": "teamtailor",
               "bamboohr.com": "bamboohr", "workable.com": "workable"}
 
 

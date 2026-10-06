@@ -34,14 +34,17 @@ boards:                                 # built-in boards, or the name of a file
   hydepark:                             # jobs at Hyde Park Venture Partners portfolio companies
     job_functions: [Software Engineering]
   # ATS boards: `discover: true` reads postings found by discovery (below); `companies` lists whole boards,
-  # e.g. greenhouse: {companies: [stripe, airbnb], discover: true}. Workday, Dover, ADP and Gem only discover.
+  # e.g. greenhouse: {companies: [stripe, airbnb], discover: true}. Workday only discovers.
   greenhouse: {discover: true, timeout_s: 1800}
   lever: {discover: true}
   ashby: {discover: true}
   workday: {discover: true, timeout_s: 1800}
-  dover: {discover: true}
-  adp: {discover: true}
-  gem: {discover: true}
+  dover: {job_board: true, discover: true}          # Dover's public job feed, plus discovered links
+  adp:                                              # ADP Workforce Now: the cid= in a posting link
+    companies: {a5625759-3bfa-45e5-889d-6b071698195a: JRAD}
+    discover: true
+  gem: {companies: [nominal], discover: true}       # Gem boards: jobs.gem.com/<name>
+  vc_boards: {}                                     # discovery.getro / consider jobs no ATS board above reads
 
 discovery:                              # links to ATS postings, fetched once per run
   github_readmes:                       # public job lists (free)
@@ -49,6 +52,12 @@ discovery:                              # links to ATS postings, fetched once pe
     - https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md
     - https://raw.githubusercontent.com/pittcsc/Summer2025-Internships/dev/README.md
   # google: {api_key_env: GOOGLE_API_KEY, cx_env: GOOGLE_CX}   # optional: Google Custom Search, 100 free queries a day
+  # getro:                              # VC portfolio job boards on Getro: collection id: name
+  #   collections: {189: Redpoint, 222: General Catalyst, 8672: Accel, 246: Insight Partners, 45303: FirstMark,
+  #                 120: Lerer Hippeau, 1005: 8VC, 767: Menlo, 25: Foundry, 1124: Primary, 616: Greycroft, 103: Lux,
+  #                 184: Upfront, 2105: Thrive}       # Hyde Park (112) is the hydepark board above
+  #   locations: [United States]
+  # consider: {boards: {jobs.a16z.com: a16z}}   # VC boards on Consider; roles default to [software-engineer]
 
 filters:                                # run before any model, in this order
   location:

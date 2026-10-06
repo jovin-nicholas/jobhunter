@@ -1,5 +1,6 @@
-"""Workday, Dover, ADP and Gem postings found by discovery. These sites have no public job API, so each posting page
-is downloaded and read: its JSON-LD JobPosting block when it has one, otherwise the most job-like block of text."""
+"""Workday postings found by discovery. Workday has no public job API, so each posting page is downloaded and read: its
+JSON-LD JobPosting block when it has one, otherwise the most job-like block of text. (Dover, Gem and ADP read their own
+JSON APIs: dover.py, gem.py, adp.py.)"""
 from __future__ import annotations
 
 import html
@@ -72,8 +73,8 @@ def read_posting(markup: str) -> dict:
 
 class _ScrapedBoard:
     ats = ""
-    # Only Workday is known to answer a closed posting with an ordinary, empty page. Elsewhere an empty page may be a
-    # posting that needs JavaScript, so it is tried again next run rather than recorded as gone.
+    # Workday answers a closed posting with an ordinary, empty page. A subclass for a site whose empty page may be a
+    # posting that needs JavaScript leaves this False, so the posting is tried again next run rather than recorded as gone.
     empty_page_is_gone = False
 
     @dataclass
@@ -149,22 +150,3 @@ class _ScrapedBoard:
 class WorkdayBoard(_ScrapedBoard):
     ats = "workday"
     empty_page_is_gone = True
-
-
-@board("dover")
-class DoverBoard(_ScrapedBoard):
-    ats = "dover"
-
-
-@board("gem")
-class GemBoard(_ScrapedBoard):
-    ats = "gem"
-
-
-@board("adp")
-class AdpBoard(_ScrapedBoard):
-    ats = "adp"
-
-    def job_id(self, p: Posting) -> str:
-        # ADP job numbers are per company, so the company id (cid) is part of the job id.
-        return f"adp_{p.slug}_{p.job_id}"

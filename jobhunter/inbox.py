@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import imaplib
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email import message_from_bytes
 from email.header import decode_header, make_header
-from email.utils import parseaddr, parsedate_to_datetime
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from typing import Any, Callable, Mapping
 
 from jobhunter.feedback import LABEL, parse_subject
@@ -19,7 +20,10 @@ from jobhunter.settings import NotifySettings
 
 _ALL_MAIL = "[Gmail]/All Mail"            # the English name; other languages are found by the \All attribute
 _LIST_RE = re.compile(rb'\((?P<flags>[^)]*)\) "[^"]*" "?(?P<name>[^"]+)"?$')
-_HEADERS = "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"   # PEEK: reading does not mark it read
+# One FETCH for every message; PEEK so reading does not mark it read; INTERNALDATE (when Gmail received it) for a
+# message without a Date header.
+_HEADERS = "(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"
+_UID_RE = re.compile(rb"\bUID (\d+)")
 
 
 class _Refused(Exception):
@@ -71,12 +75,22 @@ def _text(value: str | None) -> str:
         return value or ""
 
 
-def _when(value: str | None) -> str:
+def _when(value: str | None, received: bytes = b"") -> str:
+    """The Date header as ISO UTC; without one, Gmail's INTERNALDATE from the FETCH line; else now."""
     try:
         dt = parsedate_to_datetime(value)
         return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
     except Exception:
-        return datetime.now(timezone.utc).isoformat()
+        pass
+    when = imaplib.Internaldate2tuple(received) if received else None
+    if when:
+        return datetime.fromtimestamp(time.mktime(when), tz=timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _addresses(value: str) -> set[str]:
+    """Every address in a header-style value: "Name <a@b>, c@d" gives {"a@b", "c@d"}, lower case."""
+    return {addr.lower() for _, addr in getaddresses([value or ""]) if addr}
 
 
 def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, log: Callable[[str], None] = print,
@@ -87,8 +101,7 @@ def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, 
         return summary
     sender, _, feedback_to = email_addresses(cfg, env)
     # Taps come from the sending account, or from the address alerts go to when that is another account.
-    allowed = {sender.lower()} | ({env.get(cfg["to_env"], "").lower()} if cfg.get("to_env") else set())
-    allowed.discard("")
+    allowed = _addresses(sender) | (_addresses(env.get(cfg["to_env"], "")) if cfg.get("to_env") else set())
     conn = None
     try:
         conn = imap_factory("imap.gmail.com", 993, timeout=30)
@@ -105,10 +118,11 @@ def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, 
         if not uids:
             return summary
         rows = []
-        for uid in uids:
-            _, parts = conn.uid("FETCH", uid, _HEADERS)
-            raw = next((p[1] for p in parts or [] if isinstance(p, tuple)), b"")
-            msg = message_from_bytes(raw)
+        _, parts = conn.uid("FETCH", ",".join(uids), _HEADERS)
+        for prefix, raw in (p for p in parts or [] if isinstance(p, tuple) and len(p) == 2):
+            if not _UID_RE.search(prefix or b""):
+                continue
+            msg = message_from_bytes(raw or b"")
             parsed = parse_subject(_text(msg["Subject"]))
             if parseaddr(msg["From"] or "")[1].lower() not in allowed:
                 summary.ignored["foreign sender"] += 1
@@ -116,7 +130,7 @@ def read_feedback(settings: NotifySettings, env: Mapping[str, str], store: Any, 
                 summary.ignored["bad subject"] += 1
             else:
                 mid = (msg["Message-ID"] or "").strip() or "sha1:" + hashlib.sha1(raw).hexdigest()
-                rows.append({"job_id": parsed[1], "verdict": parsed[0], "received_at": _when(msg["Date"]),
+                rows.append({"job_id": parsed[1], "verdict": parsed[0], "received_at": _when(msg["Date"], prefix),
                              "message_id": mid})
         known = store.existing_ids([r["job_id"] for r in rows]) if rows else set()
         if any(r["job_id"] not in known for r in rows):

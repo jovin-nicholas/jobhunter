@@ -16,11 +16,18 @@ class TestReadme(unittest.TestCase):
             self.assertTrue((ROOT / path).exists(), path)
 
 
+class TestFullExample(unittest.TestCase):
+    def test_hyde_park_is_read_by_its_own_board_not_also_by_getro(self):
+        text = (ROOT / "examples" / "full.yaml").read_text(encoding="utf-8")
+        self.assertIn("  hydepark:", text)
+        self.assertNotIn("112: Hyde Park", text)
+
+
 class TestExample(unittest.TestCase):
     def test_commented_options_are_examples_not_claimed_defaults(self):
         text = (ROOT / "jobhunter.example.yaml").read_text(encoding="utf-8")
         self.assertNotIn("the defaults are shown", text)
-        self.assertIn("default: all 12 built-in boards", text)
+        self.assertIn("default: all 13 built-in boards", text)
         self.assertIn("default: every 1h, no quiet time", text)
 
 

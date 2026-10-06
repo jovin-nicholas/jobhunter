@@ -26,7 +26,7 @@ Secrets never go in this file: options ending in `_env` name an environment vari
 
 ## boards
 
-Left out: all 12 built-in boards run. Given: exactly the listed boards run.
+Left out: all 13 built-in boards run. Given: exactly the listed boards run.
 
 ```yaml
 boards: [dice, linkedin, greenhouse]            # names only
@@ -43,7 +43,11 @@ boards:                                          # or with options
 | `top_companies` | `amazon: true`, `amazon_queries: 4`, `greenhouse: {sofi: SoFi, stripe: Stripe}` | amazon.jobs, searched with the first `amazon_queries` search queries, plus whole Greenhouse boards: each key is the company's id from `boards.greenhouse.io/<id>`, each value the name to show. A `greenhouse` list replaces the default one |
 | `hydepark` | `collection_id: 112`, `job_functions: [Software Engineering]` | Hyde Park Venture Partners portfolio |
 | `greenhouse`, `lever`, `ashby` | `companies: []`, `discover` (on when no companies) | Company boards and discovered postings |
-| `workday`, `dover`, `adp`, `gem` | `discover: true` | Discovered postings only |
+| `workday` | `discover: true` | Discovered postings only |
+| `vc_boards` | none | Jobs from `discovery.getro` / `discovery.consider` that no ATS board above reads this run; nothing to set |
+| `dover` | `job_board: true`, `companies: []`, `discover: true` | Dover's public feed of every company's jobs, plus the careers pages listed (`app.dover.com/<name>`) and discovered postings |
+| `gem` | `companies: []`, `discover: true` | Gem boards listed (`jobs.gem.com/<name>`) and discovered postings |
+| `adp` | `companies: []`, `discover: true` | ADP Workforce Now companies listed by their `cid=` (from a posting link), as a list or as `{<cid>: Company name}` so alerts show the name; plus discovered postings |
 
 Every board also takes `enabled` (true) and `timeout_s` (1800 for discovering ATS boards, 1200 for linkedin, 600 for
 the others). A board in `plugins/` is listed the same way.
@@ -56,6 +60,10 @@ Where boards with `discover` find postings.
 |---|---|---|
 | `github_readmes` | three public new-grad and internship job lists | READMEs whose ATS links are read; `[]` turns this off |
 | `google` | off | `{api_key_env: GOOGLE_API_KEY, cx_env: GOOGLE_CX}`: Google Custom Search, 100 free queries a day. Google closed this API to new customers and ends it on 2027-01-01, so only existing keys work, and only until then |
+| `getro` | off | `{collections: {189: Redpoint, 1124: Primary}, job_functions: [Software Engineering], locations: [United States], seniority: [], max_pages: 10}`: VC portfolio job boards on Getro (the id is the board's collection number). Newest first; a board stops at an empty page, the first page past `max_age_hours`, or a page with nothing new. Jobs cached by an earlier run count as known only once a run has read that board to one of those stops; after a failed page or `max_pages`, the next run pages past them |
+| `consider` | off | `{boards: {jobs.a16z.com: a16z}, roles: [software-engineer]}`: VC portfolio job boards on Consider (a16z; Sequoia, Lightspeed and others use the same system). The 25 newest jobs per role |
+
+Jobs from `getro` and `consider` whose link is a Greenhouse, Lever, Ashby, Workday, Gem, Dover or ADP posting go to that board when it runs this time with `discover` on, and it reads the full posting. Every other job comes from the `vc_boards` board, including an ATS link whose board is off, has `discover` off (e.g. `greenhouse` with only `companies`), is missing from an explicit `boards:` list, or is left out by `--only`; `vc_boards` logs how many links it handed over and kept. An explicit `boards:` list must include `vc_boards` to get these jobs. A posting listed by two VC boards, under the same link, is one job. `vc_boards` reads each description from the posting page; when the page gives no description (under 200 characters), the job is tried again on later runs rather than judged by its title, and the board's summary counts it as "no description". Listings from the last `max_age_hours` (an undated one from when it was first seen) are kept in `data/vc_listings.json` between runs; `--dry-run` neither reads nor writes that file, so a dry run reads every board from its first page.
 
 ## filters
 
@@ -76,8 +84,8 @@ All optional; they run in this order before any model.
 | `systemone` | Off unless set. `{model: nimble:9b-q4_K_M}` (also `url`, `timeout_s: 30`, `skip_if: []`): a local System One model (Ollama 0.35+). See below. |
 
 Matching is whole-word and case-insensitive. `employment` looks for signals such as "contractor", "c2c", "1099",
-"$55/hr", "6-month contract" or "employment type: contract"; it does not skip on the bare word "contracts" ("vendor
-contracts", "smart contracts"), only on the employment-type wording above.
+"W2 only" or "only W2", "$55/hr", "6-month contract" or "employment type: contract"; it does not skip on the bare
+word "contracts" ("vendor contracts", "smart contracts"), only on the employment-type wording above.
 
 ### systemone
 

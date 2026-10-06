@@ -23,8 +23,9 @@ def header(frm, subject, mid="<m1@x>", date="Mon, 05 Oct 2026 10:00:00 +0000"):
 class FakeImap:
     """The imaplib replies inbox.py relies on: (status, data) tuples, FETCH data as [(prefix, bytes), b")"]."""
 
-    def __init__(self, messages, folders=None, fail_on=None, no_on=None):
+    def __init__(self, messages, folders=None, fail_on=None, no_on=None, internal=None):
         self.messages, self.calls, self.fail_on, self.stored, self.no_on = messages, [], fail_on, [], no_on
+        self.internal = internal or {}
         self.folders = folders or [b'(\\HasNoChildren) "/" "INBOX"', b'(\\HasNoChildren \\All) "/" "[Gmail]/All Mail"']
 
     def _step(self, name):
@@ -56,7 +57,14 @@ class FakeImap:
             self.search = args
             return "OK", [" ".join(self.messages).encode()]
         if command == "FETCH":
-            return "OK", [(b"1 (UID " + args[0].encode() + b" BODY[HEADER])", self.messages[args[0]]), b")"]
+            # One FETCH for a whole UID set, as imaplib returns it: (prefix, literal) per message, then b")".
+            parts = []
+            for n, uid in enumerate(args[0].split(","), 1):
+                when = self.internal.get(uid, "05-Oct-2026 12:00:00 +0000")
+                prefix = f'{n} (UID {uid} INTERNALDATE "{when}" BODY[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)] ' \
+                         f'{{{len(self.messages[uid])}}}'
+                parts += [(prefix.encode(), self.messages[uid]), b")"]
+            return "OK", parts
         if command == "STORE":
             self.stored.append(args)
             return "OK", [b""]
@@ -179,6 +187,26 @@ class TestImapReplies(InboxTestCase):
         self.assertIn("AUTHENTICATIONFAILED", self.logs[0])
         self.assertIn("app password", self.logs[0])
         self.assertNotIn("app-pass", self.logs[0])
+
+class TestFetchAndSenders(InboxTestCase):
+    def test_all_messages_come_in_one_fetch(self):
+        imap = FakeImap({str(u): header("sender@example.com", "jh:good:dice_1", mid=f"<m{u}@x>") for u in range(11, 16)})
+        self.read(imap)
+        self.assertEqual(imap.calls.count("fetch"), 1)
+
+    def test_a_missing_date_uses_gmails_received_time(self):
+        imap = FakeImap({"11": header("sender@example.com", "jh:good:dice_1", date=None)},
+                        internal={"11": "03-Oct-2026 09:30:00 +0000"})
+        self.read(imap)
+        self.assertEqual(self.store.latest_feedback()[0]["received_at"], "2026-10-03T09:30:00+00:00")
+
+    def test_to_env_written_with_a_name_or_as_a_list_still_matches(self):
+        from jobhunter.inbox import read_feedback
+        env = dict(ENV, NOTIFY_EMAIL='"John" <John.Doe@example.com>, phone@example.com')
+        imap = FakeImap({"11": header("john.doe@example.com", "jh:good:dice_1"),
+                         "12": header("phone@example.com", "jh:bad:dice_1", mid="<m2@x>")})
+        summary = read_feedback(SETTINGS, env, self.store, log=self.logs.append, imap_factory=lambda *a, **k: imap)
+        self.assertEqual(dict(summary.saved), {"good": 1, "bad": 1})
 
 
 

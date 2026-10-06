@@ -140,6 +140,87 @@ class TestAshby(unittest.TestCase):
         self.assertEqual(list(AshbyBoard({"companies": ["nope"]}).search(ctx(Routes({}), logs=logs))), [])
         self.assertTrue(any("nope" in line for line in logs), logs)
 
+HOSTED = "https://jobs.ashbyhq.com/api/non-user-graphql"
+
+
+class FakeResponse:
+    def __init__(self, data, status=200):
+        self.data, self.status_code = data, status
+
+    def json(self):
+        return self.data
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise not_found(HOSTED, self.status_code)
+
+
+class HostedRoutes(Routes):
+    """Routes, plus Ashby's hosted job-board GraphQL: `boards` maps a slug to {posting id: (hours ago, title)}."""
+
+    def __init__(self, routes, boards):
+        super().__init__(routes)
+        self.boards, self.posts = boards, []
+
+    def request(self, method, url, json=None, **kw):
+        assert method == "POST" and url.split("?")[0] == HOSTED, (method, url)
+        v = json["variables"]
+        slug = v["organizationHostedJobsPageName"]
+        if slug not in self.boards:
+            return FakeResponse({"data": {"jobBoard" if "jobPostingId" not in v else "jobPosting": None}})
+        if "jobPostingId" not in v:
+            self.posts.append((slug, None))
+            return FakeResponse({"data": {"jobBoard": {"jobPostings": [
+                {"id": i, "title": t} for i, (_, t) in self.boards[slug].items()]}}})
+        self.posts.append((slug, v["jobPostingId"]))
+        hours, title = self.boards[slug][v["jobPostingId"]]
+        return FakeResponse({"data": {"jobPosting": {
+            "id": v["jobPostingId"], "title": title, "locationName": "San Francisco, CA",
+            "publishedDate": (NOW - timedelta(hours=hours)).date().isoformat(), "descriptionHtml": "<p>Ship <b>features</b>.</p>"}}})
+
+
+class TestAshbyHostedFallback(unittest.TestCase):
+    """Some companies turn Ashby's public posting API off (404) while their hosted job board still works."""
+
+    def test_a_listed_company_is_read_from_its_hosted_board(self):
+        http = HostedRoutes({}, {"whatnot": {"p1": (2, "Software Engineer"), "p2": (500, "Old Role")}})
+        jobs = list(AshbyBoard({"companies": ["whatnot"]}).search(ctx(http)))
+        self.assertEqual([(j.id, j.title, j.company) for j in jobs], [("ashby_p1", "Software Engineer", "whatnot")])
+        job = jobs[0]
+        self.assertEqual((job.location, job.url, job.source), ("San Francisco, CA", "https://jobs.ashbyhq.com/whatnot/p1", "ashby"))
+        self.assertEqual(job.description, "Ship features.")
+        self.assertTrue(job.posted_at)
+
+    def test_known_postings_are_not_fetched_again_and_old_ones_are_remembered_as_stale(self):
+        stale = []
+        http = HostedRoutes({}, {"whatnot": {"p1": (2, "A"), "p2": (500, "B"), "p3": (1, "C")}})
+        jobs = list(AshbyBoard({"companies": ["whatnot"]}).search(ctx(http, known={"ashby_p3"}, stale=stale)))
+        self.assertEqual([j.id for j in jobs], ["ashby_p1"])
+        self.assertEqual(stale, ["ashby_p2"])
+        self.assertNotIn(("whatnot", "p3"), http.posts)
+
+    def test_discovered_postings_use_the_hosted_board_too(self):
+        gone = []
+        http = HostedRoutes({}, {"evenup": {"e1": (3, "Backend Engineer")}})
+        urls = ["https://jobs.ashbyhq.com/evenup/e1", "https://jobs.ashbyhq.com/evenup/closed"]
+        jobs = list(AshbyBoard({}).search(ctx(http, urls, gone=gone)))
+        self.assertEqual([j.id for j in jobs], ["ashby_e1"])
+        self.assertEqual(gone, ["ashby_closed"])
+        self.assertEqual(http.posts.count(("evenup", None)), 1)            # one listing per company per run
+
+    def test_both_failing_is_logged_once_and_yields_nothing(self):
+        logs = []
+        http = HostedRoutes({}, {})
+        self.assertEqual(list(AshbyBoard({"companies": ["nope"]}).search(ctx(http, logs=logs))), [])
+        self.assertEqual(len([line for line in logs if "nope" in line]), 1, logs)
+
+    def test_a_working_posting_api_never_touches_the_hosted_board(self):
+        http = HostedRoutes({"https://api.ashbyhq.com/posting-api/job-board/clerk": {"jobs": [ashby("j1", 1)]}},
+                            {"clerk": {"x": (1, "never read")}})
+        self.assertEqual([j.id for j in AshbyBoard({"companies": ["clerk"]}).search(ctx(http))], ["ashby_j1"])
+        self.assertEqual(http.posts, [])
+
+
 
 class TestDiscoverDefault(unittest.TestCase):
     def test_discovery_is_on_unless_companies_are_listed(self):

@@ -159,6 +159,23 @@ class TestEmailLeavesOutInternals(unittest.TestCase):
         from jobhunter.notify import _for_reader
         self.assertEqual(_for_reader("Laya: 72% fit (alert at 60%, save at 40%)."), "Laya: 72% fit.")
 
+class TestOpenJobLink(unittest.TestCase):
+    def html(self, url):
+        smtp = MagicMock()
+        job = Job("dice_7", "Backend Engineer", "Acme", "Austin", url, source="dice")
+        with patch("jobhunter.notify.smtplib.SMTP", return_value=smtp):
+            Notifier(NotifySettings(email=BOTH.email), env=ENV).send(job, RESULT, "backend.txt")
+        msg = email.message_from_string(smtp.__enter__.return_value.sendmail.call_args.args[2])
+        return next(p.get_payload(decode=True).decode() for p in msg.walk() if p.get_content_type() == "text/html")
+
+    def test_only_web_links_get_an_open_job_button(self):
+        self.assertIn('href="https://example.com/1"', self.html("https://example.com/1"))
+        for bad in ("javascript:alert(1)", "data:text/html,x", ""):
+            with self.subTest(url=bad):
+                html_part = self.html(bad)
+                self.assertNotIn("Open job", html_part)
+                self.assertNotIn("javascript:", html_part)
+
 
 
 if __name__ == "__main__":

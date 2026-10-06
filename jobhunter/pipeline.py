@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from jobhunter import cover_letter
-from jobhunter.discovery import Discovery
+from jobhunter.discovery import ATS_BOARDS, Discovery
 from jobhunter.errors import BoardSkipped, SettingsError
 from jobhunter.filters import Filter, build_filters
 from jobhunter.http import Http
@@ -55,6 +55,7 @@ class BoardSummary:
     retry: int = 0
     errors: int = 0
     duplicates: int = 0               # would have been notified, but the same job already was
+    no_description: int = 0           # of `retry`: the posting page gave no description (boards that need one)
     failed: str | None = None         # why the board's search produced nothing
     skipped_reason: str | None = None  # the board cannot run here (e.g. LinkedIn without Node.js)
 
@@ -138,16 +139,19 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
             log(f"feedback: could not read the inbox ({type(e).__name__})")
     s = app.settings.search
     http = http or Http()
+    boards = {name: b for name, b in app.boards.items() if only is None or name in only}
     ctx = SearchContext(s.queries, s.locations, s.max_age_hours, http, log,
-                        discovery=Discovery(app.settings.discovery, s.queries, http, log),
+                        discovery=Discovery(app.settings.discovery, s.queries, http, log,
+                                            cache_path=None if dry_run else app.settings.data_dir / "vc_listings.json",
+                                            max_age_hours=s.max_age_hours),
                         is_known=store.is_terminal,
                         mark_stale=(lambda job_id: None) if dry_run else store.mark_stale,
-                        mark_gone=(lambda job_id: None) if dry_run else store.mark_gone)
+                        mark_gone=(lambda job_id: None) if dry_run else store.mark_gone,
+                        discovering=frozenset(name for name, b in boards.items() if _discovers(name, b)))
     if not s.fetch_descriptions:
         fetch_page = None
     elif fetch_page is None:
         fetch_page = lambda url: fetch_description(http, url, log)   # noqa: E731
-    boards = {name: b for name, b in app.boards.items() if only is None or name in only}
     summary = {name: BoardSummary() for name in boards}
 
     found = _search_all(app, boards, ctx, summary, log)
@@ -179,12 +183,24 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
         detail = f"FAILED: {c.failed}" if c.failed else f"skipped: {c.skipped_reason}" if c.skipped_reason else (
             f"found {c.found}, new {c.new}, notified {c.notified}, duplicates {c.duplicates}, logged {c.logged}, "
             f"skipped {c.skipped}, "
-            f"filtered {sum(c.filtered.values())} {dict(c.filtered) or ''}, retry {c.retry}, errors {c.errors}")
+            f"filtered {sum(c.filtered.values())} {dict(c.filtered) or ''}, retry {c.retry}, errors {c.errors}"
+            + (f", no description {c.no_description}" if c.no_description else ""))
         log(f"[{name}] {detail}".rstrip())
     notes = {f.report() for f in app.filters if callable(getattr(f, "report", None))} - {None}
     for note in sorted(notes):
         log(note)
     return summary
+
+
+def _discovers(name: str, board: Any) -> bool:
+    """An ATS board that reads discovered links: greenhouse, lever and ashby decide `discover` from their companies,
+    the others keep it in their options."""
+    if name not in ATS_BOARDS:
+        return False
+    on = getattr(board, "discover", None)
+    if on is None:
+        on = getattr(getattr(board, "options", None), "discover", False)
+    return on is True
 
 
 def _search_all(app: App, boards: dict[str, Any], ctx: SearchContext, summary: dict[str, BoardSummary],
@@ -282,6 +298,16 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
     if refused and needs_page_fetch(job.description, job.description_is_snippet):
         counts.retry += 1
         log(f"RETRY_LATER [{job.source}] {job.title} at {job.company}: description unavailable, not scored")
+        if not dry_run:
+            store.save(job, "error_unavailable")
+        return
+    # A board whose listings carry no description of their own (vc_boards) has nothing but a title when the posting
+    # page gave no text, so the job is tried again next run like a refused one.
+    if getattr(board, "needs_description", False) and needs_page_fetch(job.description, job.description_is_snippet):
+        counts.retry += 1
+        counts.no_description += 1
+        log(f"RETRY_LATER [{job.source}] {job.title} at {job.company}: no description on the posting page, "
+            "not scored")
         if not dry_run:
             store.save(job, "error_unavailable")
         return

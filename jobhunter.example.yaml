@@ -29,7 +29,7 @@ scorers:                                # tried in order until one answers
                                               # run `ollama pull gemma4:e4b` first
 
 # Optional (examples; leave them out for the defaults):
-# boards: [dice, linkedin, greenhouse, lever, ashby, workday]   # default: all 12 built-in boards
+# boards: [dice, linkedin, greenhouse, lever, ashby, workday]   # default: all 13 built-in boards
 # schedule: {every: 30m, quiet_hours: "22:00-07:00"}           # default: every 1h, no quiet time
 # notify:                               # secrets stay in .env; name the variables here
 #   slack: {webhook_env: SLACK_WEBHOOK_URL}

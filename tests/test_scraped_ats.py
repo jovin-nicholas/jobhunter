@@ -3,7 +3,7 @@ import unittest
 import unittest.mock
 from datetime import datetime, timedelta, timezone
 
-from jobhunter.boards.scraped_ats import AdpBoard, DoverBoard, GemBoard, WorkdayBoard, read_posting
+from jobhunter.boards.scraped_ats import WorkdayBoard, read_posting
 from jobhunter.models import SearchContext
 from tests.helpers import FakeResponse
 from tests.test_ats_boards import FakeDiscovery
@@ -18,8 +18,6 @@ WORKDAY_PAGE = (f"<html><head><title>Software Engineer I | Gamma</title>"
 DOVER_PAGE = ("<html><body><h1>Backend Engineer</h1><nav>Menu</nav><div class='job-description'>"
               "<p>You will build Python services. Requirements: 2 years.</p></div></body></html>")
 WD_URL = "https://gamma.wd5.myworkdayjobs.com/en-US/External/job/Austin-TX/Software-Engineer_R123"
-ADP_URL = ("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
-           "?cid=c0ffee&jobId=515151&lang=en_US")
 
 
 class Pages:
@@ -62,17 +60,6 @@ class TestScrapedBoards(unittest.TestCase):
         self.assertEqual([(j.id, j.company, j.location, j.ats) for j in jobs],
                          [("workday_Software-Engineer_R123", "gamma", "Austin, TX, US", "workday")])
         self.assertIn("Mozilla", http.calls[0][1]["headers"]["User-Agent"])
-
-    def test_adp_id_includes_the_company(self):
-        jobs = list(AdpBoard({}).search(ctx(Pages({ADP_URL: DOVER_PAGE}), [ADP_URL])))
-        self.assertEqual([j.id for j in jobs], ["adp_c0ffee_515151"])
-
-    def test_dover_and_gem(self):
-        dover, gem = "https://jobs.dover.io/acme/abc-123", "https://jobs.gem.com/acme/xyz"
-        self.assertEqual([j.id for j in DoverBoard({}).search(ctx(Pages({dover: DOVER_PAGE}), [dover]))],
-                         ["dover_abc-123"])
-        self.assertEqual([j.title for j in GemBoard({}).search(ctx(Pages({gem: DOVER_PAGE}), [gem]))],
-                         ["Backend Engineer"])
 
     def test_known_stale_and_failing_postings(self):
         stale = WORKDAY_PAGE.replace(RECENT, "2020-01-01")
@@ -141,17 +128,6 @@ class TestRedirects(unittest.TestCase):
         self.assertEqual(len(jobs), 1)
         self.assertTrue(all(kw.get("allow_redirects") is False for _, kw in http.calls))
         self.assertTrue(any("redirect" in line for line in logs), logs)
-
-
-class TestEmptyPagesElsewhere(unittest.TestCase):
-    def test_an_empty_page_on_dover_adp_or_gem_is_tried_again_later(self):
-        empty = "<html><head><title>Dover</title></head><body><div id='root'></div></body></html>"   # JavaScript only
-        for board, url in ((DoverBoard, "https://jobs.dover.io/acme/abc-123"), (GemBoard, "https://jobs.gem.com/acme/x"),
-                           (AdpBoard, ADP_URL)):
-            gone, logs = [], []
-            jobs = list(board({}).search(ctx(Pages({url: empty}), [url], gone=gone, logs=logs)))
-            self.assertEqual((jobs, gone), ([], []), board)
-            self.assertTrue(any("no job data" in line for line in logs), logs)
 
 
 if __name__ == "__main__":

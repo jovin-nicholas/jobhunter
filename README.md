@@ -75,8 +75,12 @@ loads the model, about 5 s).
   log notes it once per run, and `check-config` says what is missing.
 - A job whose description could not be downloaded (the site refused or timed out) is not scored from its title; it
   is saved as `error_unavailable` and tried again on the next run.
-- Fine-tuning your own alert checkpoint: [training/](training/) holds `laya_train.py` and `train_alert.ipynb`, with
-  dependencies in `requirements-train.txt`, to fine-tune Laya on your own labels.
+- Fine-tuning your own checkpoint: [training/](training/) holds `laya_train.py` and two Colab notebooks, with
+  dependencies in `requirements-train.txt`. `train_questions.ipynb` trains a questions checkpoint (stack role,
+  dealbreaker and fit) on your own labelled jobs: upload the six files it lists, run the cells on a GPU, read the
+  report it prints, then download the single zip it writes and check it with `shasum -a 256 -c SHA256SUMS`. If Colab
+  disconnects, rerun the setup and data cells and the restore cell picks up the best saved epoch. Point `laya.model`
+  at the unzipped folder. `train_alert.ipynb` trains the older single-question alert checkpoint.
 
 ## Ollama: choosing a local model
 
@@ -130,12 +134,33 @@ on an Apple-silicon Mac. The location question is asked only when the location r
 for jobs the other filters kept. If the model is missing or slow, the run log says so once and jobs go on to the
 scorers as usual. Details are in [docs/settings.md](docs/settings.md#systemone).
 
+### Optional: skip contract and hourly jobs
+
+No board says whether a job is a contract or paid by the hour, so the `employment` filter reads the title and
+description for it, before any model runs:
+
+```yaml
+  employment:
+    exclude: [contract, hourly]   # either or both
+    contract_to_hire: keep        # or exclude
+    hourly_internships: keep      # or exclude
+```
+
+Contract wording includes "contractor", "C2C", "1099", "W2 only" / "only W2", "6-month contract" and "employment
+type: contract"; hourly means a stated rate such as "$55/hr" or "$50-60 per hour" (not "the salary or hourly rate
+offered"). A skipped job is saved as `filtered` with the matched words as its reason, e.g. "contract: c2c". Details
+are in [docs/settings.md](docs/settings.md).
+
 ## Boards
 
-All 12 built-in boards run unless `boards:` lists others: `dice`, `linkedin`, `industry_jobs` (dev.to),
+All 13 built-in boards run unless `boards:` lists others: `dice`, `linkedin`, `industry_jobs` (dev.to),
 `top_companies` (Amazon, SoFi, Stripe), `hydepark`, and the ATS boards `greenhouse`, `lever`, `ashby`, `workday`,
-`dover`, `adp` and `gem`, which read postings found by discovery in the public job lists. Greenhouse, Lever and Ashby
-can also list whole company boards: `greenhouse: {companies: [stripe, airbnb]}`.
+`dover`, `adp` and `gem`, which read postings found by discovery in the public job lists. Greenhouse, Lever, Ashby,
+Gem and ADP can also list whole company boards: `greenhouse: {companies: [stripe, airbnb]}`; Dover also reads its
+public feed of every company's jobs (`job_board: true`). With `discovery.getro` or `discovery.consider` set, VC portfolio job boards (Redpoint, Accel,
+a16z, ...) add their startups' jobs: a Greenhouse, Lever, Ashby, Workday, Gem, Dover or ADP link goes to that board when
+it runs with `discover` on, and every other link, including an ATS link whose board is off, not discovering or left out
+by `--only`, comes from `vc_boards`. An explicit `boards:` list must include `vc_boards` to get these jobs.
 
 - **linkedin** searches through the `linkedin-jobs-mcp` server, which needs Node.js (`npx`; the first run downloads
   it). Without Node.js the board is skipped with a note. Descriptions come from LinkedIn's public job-posting pages,

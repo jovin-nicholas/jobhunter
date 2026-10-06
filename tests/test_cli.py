@@ -49,6 +49,13 @@ class TestCli(unittest.TestCase):
         self.assertIn("no name found", out)
         self.assertIn("CANDIDATE_NAMES", out)
 
+    def test_check_config_notes_hyde_park_read_twice(self):
+        self.path.write_text(SETTINGS.replace("  fake: {}\n", "  fake: {}\n  hydepark: {}\n")
+                             + "discovery: {github_readmes: [], getro: {collections: {112: Hyde Park}}}\n")
+        code, out, _ = cli("--settings", str(self.path), "check-config")
+        self.assertEqual(code, 0)
+        self.assertIn("note: boards.hydepark", out)
+
     def test_check_config_lists_every_problem(self):
         self.path.write_text(SETTINGS.replace("fake: {}", "nope: {}").replace("fixed: {}", "ghost: {}"))
         code, _, err = cli("--settings", str(self.path), "check-config")
@@ -80,7 +87,7 @@ class TestCli(unittest.TestCase):
 
 class TestExampleSettings(unittest.TestCase):
     ALL_BOARDS = ("dice", "linkedin", "industry_jobs", "top_companies", "hydepark", "greenhouse", "lever",
-                  "ashby", "workday", "dover", "adp", "gem")
+                  "ashby", "workday", "dover", "adp", "gem", "vc_boards")
 
     def check(self, example, resumes):
         tmp = Path(tempfile.mkdtemp())
@@ -95,9 +102,9 @@ class TestExampleSettings(unittest.TestCase):
         self.assertEqual(code, 0, err)
         return tmp, out
 
-    def test_the_example_is_short_and_runs_all_twelve_boards(self):
+    def test_the_example_is_short_and_runs_all_thirteen_boards(self):
         tmp, out = self.check(ROOT / "jobhunter.example.yaml", ["resume.pdf"])
-        self.assertIn("12 board(s)", out)
+        self.assertIn("13 board(s)", out)
         self.assertLessEqual(len((ROOT / "jobhunter.example.yaml").read_text().splitlines()), 40)
         _, out, _ = cli("--settings", str(tmp / "jobhunter.yaml"), "list-boards")
         for name in self.ALL_BOARDS:
@@ -105,7 +112,8 @@ class TestExampleSettings(unittest.TestCase):
 
     def test_the_job_notifier_example_validates(self):
         _, out = self.check(ROOT / "examples" / "full.yaml", ["backend.txt", "fullstack.txt"])
-        self.assertIn("12 board(s)", out)
+        self.assertIn("13 board(s)", out)
+        self.assertIn("vc_boards", out)
 
 
 class TestEnvExample(unittest.TestCase):

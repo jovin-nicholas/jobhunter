@@ -18,7 +18,7 @@ _CONTRACT_TITLE_TERMS = ("c2c", "corp to corp", "1099", "w2 contract", "contract
 # Phrases safe to match anywhere in the title or description (unlike the bare word "contract", which also turns up
 # in "manage vendor contracts" or "smart contracts").
 _CONTRACT_PHRASE_TERMS = ("contract role", "contract position", "contract opportunity", "contract assignment",
-                          "c2c", "corp to corp", "1099", "w2 contract", "w2 only")
+                          "c2c", "corp to corp", "1099", "w2 contract", "w2 only", "only w2")
 # Skipped only when contract_to_hire is "exclude"; these alone never skip otherwise.
 _CONTRACT_TO_HIRE_TERMS = ("contract to hire", "cth", "temp to perm", "temp to hire")
 # The same phrases in raw text, spaced or hyphenated ("contract-to-hire"), for masking before the regexes run.

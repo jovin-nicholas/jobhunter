@@ -62,12 +62,19 @@ class TestContractDescriptionPhrases(unittest.TestCase):
             "1099 candidates welcome.": "1099",
             "This is a W2 Contract engagement.": "w2 contract",
             "W2 Only, no exceptions.": "w2 only",
+            "Not a 1099 job. Only W2.": "1099",
+            "Only W2 candidates, no third parties.": "only w2",
         }
         for description, snippet in cases.items():
             with self.subTest(description=description):
                 result = f().check(job(description=description))
                 self.assertFalse(result.keep, description)
                 self.assertEqual(result.reason, f"contract: {snippet}")
+
+    def test_only_w2_in_the_title_skips(self):
+        result = f().check(job("Azure Data Engineer (ONLY W2)"))
+        self.assertFalse(result.keep)
+        self.assertEqual(result.reason, "contract: only w2")
 
     def test_negative_phrases_are_kept(self):
         for description in ("We manage vendor contracts for clients.", "We build smart contracts on-chain.",

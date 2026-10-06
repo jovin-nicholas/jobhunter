@@ -326,6 +326,48 @@ class TestNoBlindScoring(unittest.TestCase):
         self.assertEqual(summary["refusing"].retry, 2)
 
 
+NEEDS_TEXT = """
+from jobhunter import Job, board
+
+
+@board("needs_text")
+class NeedsText:
+    needs_description = True          # like vc_boards: the listing has no description of its own
+
+    def __init__(self, options):
+        pass
+
+    def search(self, ctx):
+        for name in ("empty", "short", "full"):
+            yield Job(f"n_{name}", "Great Engineer", "Acme", "Remote - US", f"https://example.com/{name}")
+"""
+
+
+class TestNoDescriptionNoScore(unittest.TestCase):
+    def test_a_job_whose_page_gave_no_description_is_retried_not_scored_from_its_title(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = ("resumes: {folder: resumes, default: backend.txt}\n"
+                    "search: {queries: [swe], locations: [Remote]}\n"
+                    "boards: {needs_text: {}}\nscorers: [fixed]\ndiscovery: {github_readmes: []}\n")
+        path = write_project(tmp, settings, plugins={"needs_text.py": NEEDS_TEXT, "scorers.py": SCORERS})
+        pages = {"empty": "", "short": "Apply now. " * 10, "full": "Build our platform in Python. " * 20}
+        store, logs = Store(tmp / "data" / "jobs.db"), []
+        summary = run(bootstrap(path, env={}), store, FakeNotifier(), log=logs.append,
+                      fetch_page=lambda url: pages[url.rsplit("/", 1)[1]])
+        with closing(sqlite3.connect(store.path)) as conn:
+            statuses = dict(conn.execute("SELECT id, status FROM jobs"))
+        self.assertEqual(statuses, {"n_empty": "error_unavailable", "n_short": "error_unavailable",
+                                    "n_full": "notified"})
+        self.assertEqual((summary["needs_text"].retry, summary["needs_text"].no_description), (2, 2))
+        line = next(l for l in logs if l.startswith("[needs_text] found"))
+        self.assertIn("no description 2", line)
+        self.assertTrue(any(l.startswith("RETRY_LATER [needs_text]") and "no description" in l for l in logs), logs)
+
+    def test_vc_boards_jobs_need_a_description(self):
+        from jobhunter.boards.vc_boards import VcBoardsBoard
+        self.assertTrue(VcBoardsBoard.needs_description)
+
+
 SKIPPING = """
 from jobhunter import board
 from jobhunter.errors import BoardSkipped
@@ -564,6 +606,64 @@ class TestFeedbackHook(PipelineTestCase):
         self.run_once(feedback=lambda: called.append(1), dry_run=True)
         self.assertEqual(called, [])
 
+
+DISCOVERING = """
+from jobhunter import board
+
+SEEN = []
+
+
+@board("look")
+class Look:
+    def __init__(self, options):
+        pass
+
+    def search(self, ctx):
+        SEEN.append(ctx.discovering)
+        return []
+"""
+
+
+class TestDiscoveringBoards(unittest.TestCase):
+    def run_with(self, boards, only=None):
+        tmp = Path(tempfile.mkdtemp())
+        settings = ("resumes: {folder: resumes, default: backend.txt}\n"
+                    "search: {queries: [swe], locations: [Remote], fetch_descriptions: false}\n"
+                    f"boards: {boards}\nscorers: [fixed]\ndiscovery: {{github_readmes: []}}\n")
+        path = write_project(tmp, settings, plugins={"look.py": DISCOVERING, "scorers.py": SCORERS})
+        seen = sys.modules.get("jobhunter_plugins.look")
+        if seen is not None:
+            seen.SEEN.clear()
+        run(bootstrap(path, env={}), Store(tmp / "data" / "jobs.db"), FakeNotifier(), log=lambda line: None,
+            only=only, http=NoHttp())
+        return sys.modules["jobhunter_plugins.look"].SEEN[0]
+
+    def test_boards_learn_which_ats_boards_read_discovered_links_this_run(self):
+        self.assertEqual(self.run_with("{look: {}, greenhouse: {companies: [acme]}, lever: {}, workday: {discover: false}}"),
+                         {"lever"})
+        self.assertEqual(self.run_with("{look: {}, lever: {}, ashby: {}}", only={"look", "ashby"}), {"ashby"})
+
+
+class NoHttp:
+    def request(self, method, url, **kw):
+        raise RuntimeError("no network in tests")
+
+
+class TestVcCachePath(PipelineTestCase):
+    def test_dry_run_gives_discovery_no_cache_path_and_a_real_run_does(self):
+        from unittest.mock import patch
+        import jobhunter.pipeline as pipeline
+        seen = []
+        real = pipeline.Discovery
+
+        def record(*a, **kw):
+            seen.append(kw.get("cache_path"))
+            return real(*a, **kw)
+        with patch.object(pipeline, "Discovery", side_effect=record):
+            self.run_once(dry_run=True)
+            self.run_once()
+        self.assertIsNone(seen[0])
+        self.assertEqual(seen[1].name, "vc_listings.json")
 
 
 if __name__ == "__main__":

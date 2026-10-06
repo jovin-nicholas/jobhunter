@@ -23,7 +23,7 @@ LEVELS = ("intern", "entry", "mid", "senior", "staff")
 _TOP_KEYS = {"resumes", "search", "boards", "filters", "scorers", "decisions", "notify", "discovery", "cover_letters", "schedule"}
 # Boards that run when `boards:` is left out: every built-in board that needs no setup of its own.
 DEFAULT_BOARDS = ("dice", "linkedin", "industry_jobs", "top_companies", "hydepark", "greenhouse", "lever", "ashby",
-                  "workday", "dover", "adp", "gem")
+                  "workday", "dover", "adp", "gem", "vc_boards")
 DEFAULT_GITHUB_READMES = [
     "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/README.md",
     "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md",
@@ -147,6 +147,8 @@ class ScheduleSettings:
 class DiscoverySettings:
     github_readmes: list[str] = field(default_factory=lambda: list(DEFAULT_GITHUB_READMES))
     google: dict[str, str] | None = None      # {api_key_env, cx_env}; off unless set
+    getro: dict | None = None          # {collections: {id: name}, job_functions, locations, seniority, max_pages}
+    consider: dict | None = None       # {boards: {host: name}, roles}
 
 
 @dataclass
@@ -487,7 +489,7 @@ def _notify(c: _Checker, raw: Any) -> NotifySettings:
 
 
 def _discovery(c: _Checker, raw: Any) -> DiscoverySettings:
-    raw = c.mapping("discovery", raw, {"github_readmes", "google"})
+    raw = c.mapping("discovery", raw, {"github_readmes", "google", "getro", "consider"})
     readmes = (list(DEFAULT_GITHUB_READMES) if "github_readmes" not in raw
                else c.strings("discovery.github_readmes", raw["github_readmes"]))
     google = None
@@ -497,7 +499,58 @@ def _discovery(c: _Checker, raw: Any) -> DiscoverySettings:
         if missing:
             c.add("discovery.google", f"missing {', '.join(sorted(missing))}")
         google = {k: str(v) for k, v in g.items()}
-    return DiscoverySettings(readmes, google)
+    getro = None
+    if raw.get("getro") is not None:
+        g = c.mapping("discovery.getro", raw["getro"], {"collections", "job_functions", "locations", "seniority", "max_pages"})
+        collections = {}
+        given = g.get("collections")
+        if not isinstance(given, dict) or not given:
+            c.add("discovery.getro.collections", "expected collection ids with names, e.g. {189: Redpoint}")
+        else:
+            for key, name in given.items():
+                if isinstance(key, bool) or not str(key).isdigit() or int(key) <= 0 or not isinstance(name, str) \
+                        or not name.strip():
+                    c.add("discovery.getro.collections", f"{key!r}: expected a positive collection id and a name")
+                else:
+                    collections[int(key)] = name
+        functions = c.strings("discovery.getro.job_functions", g.get("job_functions", ["Software Engineering"]))
+        if not functions:
+            c.add("discovery.getro.job_functions", "expected at least one, e.g. [Software Engineering]")
+        getro = {"collections": collections, "job_functions": functions,
+                 "locations": c.strings("discovery.getro.locations", g.get("locations", [])),
+                 "seniority": c.strings("discovery.getro.seniority", g.get("seniority", [])),
+                 "max_pages": c.integer("discovery.getro.max_pages", g.get("max_pages", 10), 1, 50) or 10}
+    consider = None
+    if raw.get("consider") is not None:
+        k = c.mapping("discovery.consider", raw["consider"], {"boards", "roles"})
+        boards = k.get("boards")
+        if not isinstance(boards, dict) or not boards:
+            c.add("discovery.consider.boards", "expected board hosts with names, e.g. {jobs.a16z.com: a16z}")
+            boards = {}
+        for host, name in boards.items():
+            if not re.fullmatch(r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}", str(host)):
+                c.add("discovery.consider.boards", f"{host!r}: expected a host name such as jobs.a16z.com")
+            elif not isinstance(name, str) or not name.strip():
+                c.add("discovery.consider.boards", f"{host}: expected the board's name as text, e.g. a16z")
+        roles = c.strings("discovery.consider.roles", k.get("roles", ["software-engineer"]))
+        if not roles:
+            c.add("discovery.consider.roles", "expected at least one role, e.g. [software-engineer]")
+        consider = {"boards": {str(h): str(n) for h, n in boards.items()}, "roles": roles}
+    return DiscoverySettings(readmes, google, getro, consider)
+
+
+def settings_notes(settings: Settings) -> list[str]:
+    """Settings that work but probably do not do what was meant; check-config shows them as notes."""
+    notes = []
+    collections = (settings.discovery.getro or {}).get("collections") or {}
+    for b in settings.boards:
+        if b.name == "hydepark" and b.enabled:
+            cid = b.options.get("collection_id", 112)
+            if cid in collections:
+                notes.append(f"boards.hydepark and discovery.getro both read Getro collection {cid} "
+                             f"({collections[cid]}), so its jobs are fetched and judged twice; set boards.hydepark to "
+                             f"enabled: false or remove {cid} from discovery.getro.collections")
+    return notes
 
 
 def _cover_letters(c: _Checker, raw: Any, scorers: list[ScorerSettings]) -> CoverLetterSettings:

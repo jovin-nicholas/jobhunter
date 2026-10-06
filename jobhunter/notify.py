@@ -72,6 +72,9 @@ def _html(job: Job, result: ScoreResult, resume_id: str, links: list[tuple[str, 
     e = lambda s: html.escape(str(s or ""), quote=True)   # noqa: E731
     meta = " · ".join(e(x) for x in (job.company, job.location, job.source,
                                      f"posted {job.posted_at}" if job.posted_at else "") if x)
+    # Only a web link gets a button: a scraped javascript: or data: URL would be live in some mail apps.
+    open_job = (f'<p><a href="{e(job.url)}" style="{_BTN};background:#1a73e8;color:#ffffff">Open job ↗</a></p>'
+                if str(job.url or "").lower().startswith(("https://", "http://")) else "")
     buttons = "".join(f'<a href="{e(href)}" style="{_BTN}">{e(label)}</a>' for label, href in links)
     letter = (f'<h3 style="font-size:15px;margin:20px 0 6px">Cover letter draft</h3>'
               f'<div style="white-space:pre-wrap">{e(cover_letter)}</div>') if cover_letter else ""
@@ -81,7 +84,7 @@ def _html(job: Job, result: ScoreResult, resume_id: str, links: list[tuple[str, 
         'style="max-width:600px">'
         f'<tr><td><h2 style="font-size:18px;margin:0 0 4px">{e(job.title)}</h2>'
         f'<div style="color:#555;font-size:13px">{meta}</div>'
-        f'<p><a href="{e(job.url)}" style="{_BTN};background:#1a73e8;color:#ffffff">Open job ↗</a></p>'
+        f'{open_job}'
         f'<p style="font-size:14px;line-height:1.5">Score {e(score_label(result))} · '
         f'resume: {e(resume_id)}<br>Why: {e(_for_reader(result.reasoning))}<br>'
         f'Matched: {e(", ".join(result.matched_skills) or "none")}<br>'

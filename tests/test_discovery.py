@@ -231,6 +231,157 @@ class TestLinkCleanup(unittest.TestCase):
                                            "https://jobs.ashbyhq.com/clerk/4174686d-3925-4584-ac24-49ed637218fa",
                                            "https://jobs.lever.co/acme/b-c"})
 
+class TestDoverLinks(unittest.TestCase):
+    def test_both_dover_domains_parse(self):
+        from jobhunter.boards.ats_urls import ats_of, postings
+        for url in ("https://app.dover.com/apply/Moda/ca4df64b-0051-435f-a8e8-f728642df3f1",
+                    "https://app.dover.io/apply/moda/ca4df64b-0051-435f-a8e8-f728642df3f1?rs=1",
+                    "https://jobs.dover.io/moda/ca4df64b-0051-435f-a8e8-f728642df3f1"):
+            with self.subTest(url=url):
+                self.assertEqual(ats_of(url), "dover")
+                self.assertEqual([(p.slug, p.job_id) for p in postings("dover", [url])],
+                                 [("moda", "ca4df64b-0051-435f-a8e8-f728642df3f1")])
+
+    def test_dover_corporation_is_not_the_dover_ats(self):
+        from jobhunter.boards.ats_urls import postings
+        self.assertEqual(postings("dover", ["https://www.dover.com/careers/job/123"]), [])
+
+
+class TestVcDiscovery(unittest.TestCase):
+    GETRO = {"collections": {189: "Redpoint", 1124: "Primary"}, "job_functions": ["Software Engineering"],
+             "locations": [], "seniority": [], "max_pages": 10}
+
+    def setUp(self):
+        import tempfile
+        from datetime import datetime, timezone
+        from pathlib import Path
+        self.cache = Path(tempfile.mkdtemp()) / "vc_listings.json"
+        self.now = int(datetime.now(timezone.utc).timestamp())
+
+    def getro(self, url, kw):
+        jobs = [{"id": 1, "title": "Backend", "organization": {"name": "Acme"}, "locations": ["NYC"],
+                 "created_at": self.now - 60, "url": "https://boards.greenhouse.io/acme/jobs/123"},
+                {"id": 2, "title": "Platform", "organization": {"name": "Beta"}, "locations": ["SF"],
+                 "created_at": self.now - 60, "url": "https://beta.example/careers/platform"}]
+        return FakeResponse(json_data={"results": {"jobs": jobs if kw["json"]["page"] == 0 else []}})
+
+    def discovery(self, http, cache=True):
+        return Discovery(DiscoverySettings([], None, self.GETRO, None), [], http, lambda line: None, env={},
+                         cache_path=self.cache if cache else None, max_age_hours=72)
+
+    def test_ats_links_join_urls_and_listings_are_kept_once_per_key(self):
+        http = FakeHttp(self.getro)
+        d = self.discovery(http)
+        threads = [threading.Thread(target=d.listings) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(l.key for l in d.listings()), ["getro_1", "getro_2"])     # same jobs on two boards
+        self.assertIn("https://boards.greenhouse.io/acme/jobs/123", d.urls())
+        self.assertNotIn("https://beta.example/careers/platform", d.urls())
+        self.assertEqual(len(http.calls), 4)                     # 2 collections x (page 0 + empty page 1), once
+
+    def test_the_cache_keeps_listings_and_stops_paging_next_run(self):
+        self.discovery(FakeHttp(self.getro)).listings()
+        http = FakeHttp(self.getro)
+        again = self.discovery(http)
+        self.assertEqual(sorted(l.key for l in again.listings()), ["getro_1", "getro_2"])    # from the cache
+        self.assertEqual(len(http.calls), 2)                     # page 0 of each collection: nothing new, stop
+
+    def test_a_corrupt_cache_is_ignored_and_rewritten(self):
+        self.cache.write_text("{not json")
+        logs = []
+        d = Discovery(DiscoverySettings([], None, self.GETRO, None), [], FakeHttp(self.getro), logs.append, env={},
+                      cache_path=self.cache, max_age_hours=72)
+        self.assertEqual(len(d.listings()), 2)
+        self.assertTrue(any("cache" in line for line in logs), logs)
+        import json
+        self.assertEqual(len(json.loads(self.cache.read_text())["listings"]), 2)
+
+    def paged(self, failing_page=None):
+        """Three full pages of fresh jobs for collection 189, then an empty one; `failing_page` answers 500."""
+        def handler(url, kw):
+            page = kw["json"]["page"]
+            if page == failing_page:
+                return FakeResponse(status_code=500)
+            jobs = [{"id": page * 20 + i + 1, "title": "Backend", "organization": {"name": "Acme"}, "locations": [],
+                     "created_at": self.now - 60 * (page * 20 + i + 1), "url": f"https://beta.example/{page}/{i}"}
+                    for i in range(20)] if page < 3 else []
+            return FakeResponse(json_data={"results": {"jobs": jobs}})
+        return handler
+
+    def one_collection(self, http, **getro):
+        return Discovery(DiscoverySettings([], None, {**self.GETRO, "collections": {189: "Redpoint"}, **getro}, None),
+                         [], http, lambda line: None, env={}, cache_path=self.cache, max_age_hours=72)
+
+    def test_a_run_that_ran_out_of_pages_leaves_the_next_run_paging_past_its_cache(self):
+        self.assertEqual(len(self.one_collection(FakeHttp(self.paged()), max_pages=2).listings()), 40)
+        http = FakeHttp(self.paged())
+        self.assertEqual(len(self.one_collection(http).listings()), 60)     # pages 2 and 3 read this time
+        self.assertEqual([kw["json"]["page"] for _, _, kw in http.calls], [0, 1, 2, 3])
+        http = FakeHttp(self.paged())
+        self.one_collection(http).listings()                          # read to the end last time: cache trusted
+        self.assertEqual(len(http.calls), 1)
+
+    def test_a_run_whose_page_failed_leaves_the_next_run_paging_past_its_cache(self):
+        self.assertEqual(len(self.one_collection(FakeHttp(self.paged(failing_page=2))).listings()), 40)
+        http = FakeHttp(self.paged())
+        self.assertEqual(len(self.one_collection(http).listings()), 60)
+        self.assertEqual(len(http.calls), 4)
+
+    def test_a_cache_in_the_first_format_is_read_and_not_trusted_to_stop_paging(self):
+        import json
+        posted = datetime.fromtimestamp(self.now - 60, timezone.utc).isoformat()
+        self.cache.write_text(json.dumps([["getro_1", "Redpoint", "Backend", "Acme", "NYC",
+                                           "https://boards.greenhouse.io/acme/jobs/123", posted]]))
+        http = FakeHttp(self.getro)
+        self.assertEqual(sorted(l.key for l in self.discovery(http).listings()), ["getro_1", "getro_2"])
+        self.assertEqual(len(http.calls), 4)                     # both collections read to their empty page
+        saved = json.loads(self.cache.read_text())
+        self.assertEqual(sorted(saved["complete"]), [189, 1124])
+
+    def test_unreadable_cache_contents_are_dropped_cleanly(self):
+        import json
+        good = ["getro_1", "Redpoint", "Backend", "Acme", "NYC", "https://beta.example/1",
+                datetime.fromtimestamp(self.now - 60, timezone.utc).isoformat()]
+        for content, kept in ((json.dumps({"something": "else"}), 0), (json.dumps("text"), 0), (json.dumps(7), 0),
+                              (json.dumps([good, good[:6], good + ["x"], "row", None, [1] * 7]), 1),
+                              (json.dumps({"listings": [good, {"a": 1}], "complete": "all"}), 1)):
+            logs = []
+            self.cache.write_text(content)
+            d = Discovery(DiscoverySettings([], None, None, None), [], FakeHttp(self.getro), logs.append, env={},
+                          cache_path=self.cache, max_age_hours=72)
+            self.assertEqual(len(d.listings()), kept, content)
+            self.assertEqual(sum("vc_listings.json" in line for line in logs), 1, (content, logs))
+
+    def test_a_cache_that_cannot_be_opened_is_logged_not_raised(self):
+        self.cache.mkdir()                                       # reading a directory raises an OSError
+        logs = []
+        d = Discovery(DiscoverySettings([], None, self.GETRO, None), [], FakeHttp(self.getro), logs.append, env={},
+                      cache_path=self.cache, max_age_hours=72)
+        self.assertEqual(len(d.listings()), 2)
+        self.assertTrue(any("vc_listings.json" in line for line in logs), logs)
+
+    def test_undated_listings_leave_the_cache_once_first_seen_too_long_ago(self):
+        import json
+        old = (datetime.now(timezone.utc) - timedelta(hours=100)).isoformat()
+        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        row = lambda key: [key, "a16z", "Backend", "Acme", "NYC", f"https://beta.example/{key}", ""]   # noqa: E731
+        self.cache.write_text(json.dumps({"listings": [row("consider_old"), row("consider_new"), row("consider_x")],
+                                          "first_seen": {"consider_old": old, "consider_new": recent},
+                                          "complete": []}))
+        d = Discovery(DiscoverySettings([], None, None, {"boards": {}, "roles": []}), [], FakeHttp(self.getro),
+                      lambda line: None, env={}, cache_path=self.cache, max_age_hours=72)
+        self.assertEqual(sorted(l.key for l in d.listings()), ["consider_new", "consider_x"])
+        saved = json.loads(self.cache.read_text())
+        self.assertEqual(saved["first_seen"]["consider_new"], recent)       # kept, not restamped
+        self.assertIn("consider_x", saved["first_seen"])                   # no stamp yet: stamped now
+
+    def test_without_a_cache_path_nothing_is_written(self):
+        self.discovery(FakeHttp(self.getro), cache=False).listings()
+        self.assertFalse(self.cache.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,7 +23,7 @@ from jobhunter.notify import Notifier
 from jobhunter.pipeline import bootstrap, run
 from jobhunter.registry import build_registry
 from jobhunter.schedule import is_due, is_quiet, local_time, next_due, read_last_run, write_last_run
-from jobhunter.settings import NotifySettings, load_settings
+from jobhunter.settings import NotifySettings, load_settings, settings_notes
 from jobhunter.store import Store
 
 
@@ -255,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
             line = scorer.describe() if callable(getattr(scorer, "describe", None)) else None
             if line:
                 print(line)
-        for note in model_notes(app):
+        for note in settings_notes(app.settings) + model_notes(app):
             print(f"note: {note}")
         if not app.resumes.names:
             print("note: no name found on the default resume's first line, so none is removed before models see "

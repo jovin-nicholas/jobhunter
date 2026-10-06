@@ -96,3 +96,6 @@ class SearchContext:
     mark_stale: Callable[[str], None] = _forget
     # Records a discovered posting that no longer exists (404/410, or a page without the job), so it is not requested again.
     mark_gone: Callable[[str], None] = _forget
+    # The ATS boards that read discovered links this run (enabled, picked by --only, discover on); None: not known,
+    # taken as every ATS board.
+    discovering: frozenset[str] | set[str] | None = None
