@@ -11,7 +11,7 @@ from typing import Any, Callable, Mapping
 
 import requests
 
-from jobhunter.errors import RateLimited, ScorerError, ScorerUnavailable
+from jobhunter.errors import RateLimited, ScorerBusy, ScorerError, ScorerUnavailable
 from jobhunter.http import retry_after_seconds
 from jobhunter.models import Job, Resume, ScoreResult
 from jobhunter.registry import scorer
@@ -117,6 +117,10 @@ class CloudScorer:
             try:
                 resp = self._post(self.keys.keys[index], prompt, json_mode)
             except requests.RequestException as e:
+            except requests.ConnectionError as e:      # also ConnectTimeout
+                raise ScorerUnavailable(f"{self.provider} not reachable ({type(e).__name__})") from None
+            except requests.Timeout as e:              # connected, but no answer in time
+                raise ScorerBusy(f"{self.provider} did not answer in time ({type(e).__name__})") from None
                 # The exception text can include the request URL; only its type is reported.
                 raise ScorerUnavailable(f"{self.provider} not reachable ({type(e).__name__})") from None
             if resp.status_code == 429:
@@ -131,7 +135,7 @@ class CloudScorer:
                 raise ScorerUnavailable(f"{self.provider} has no model {self.options.model!r} (check scorers."
                                         f"{self.provider.lower()}.model): {resp.text[:200]}")
             if resp.status_code >= 500:
-                raise ScorerUnavailable(f"{self.provider} returned HTTP {resp.status_code}")
+                raise ScorerBusy(f"{self.provider} returned HTTP {resp.status_code}")
             if resp.status_code == 400 and _SETUP_ERROR.search(resp.text or ""):
                 raise ScorerUnavailable(f"{self.provider}: the API key or model cannot be used (check scorers."
                                         f"{self.provider.lower()} and .env): {resp.text[:200]}")

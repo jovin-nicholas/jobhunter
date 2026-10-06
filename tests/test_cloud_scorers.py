@@ -218,5 +218,17 @@ class TestSetupErrorsIn400(unittest.TestCase):
         self.assertNotIsInstance(caught.exception, ScorerUnavailable)
 
 
+class TestCloudBusy(unittest.TestCase):
+    def test_5xx_and_a_read_timeout_are_busy_and_a_refused_connection_is_not(self):
+        from jobhunter.errors import ScorerBusy
+        for kw, busy in (({"return_value": FakeResponse(status_code=503, text="down")}, True),
+                         ({"side_effect": requests.ReadTimeout("slow")}, True),
+                         ({"side_effect": requests.ConnectionError("refused")}, False)):
+            with self.subTest(kw=kw), patch("jobhunter.scorers.cloud.requests.post", **kw):
+                with self.assertRaises(ScorerUnavailable) as caught:
+                    GeminiScorer(FAST, env={"GEMINI_API_KEYS": "k"}).score(JOB, RESUME)
+                self.assertEqual(isinstance(caught.exception, ScorerBusy), busy)
+
+
 if __name__ == "__main__":
     unittest.main()

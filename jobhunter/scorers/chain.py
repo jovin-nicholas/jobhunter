@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from jobhunter.errors import RateLimited, ScorerError, ScorerUnavailable
+from jobhunter.errors import RateLimited, ScorerBusy, ScorerError, ScorerUnavailable
 from jobhunter.models import Job, Resume, ScoreResult, decide
 from jobhunter.settings import Decisions
 
@@ -19,7 +19,8 @@ class ChainOutcome:
 
 
 # A scorer unavailable this many jobs in a row (Ollama not running, say) is skipped for the rest of the run, rather
-# than waited on for every job.
+# than waited on for every job. A busy one (slow, or a 5xx) is running, so it is not counted, and any answer at all
+# (a garbled one, a rate limit) resets the count.
 MAX_UNAVAILABLE_IN_A_ROW = 3
 
 
@@ -43,6 +44,11 @@ class ScorerChain:
             except RateLimited as e:
                 rate_limited = True
                 errors.append(f"{name}: rate limited ({e})")
+                self._unavailable[name] = 0
+                continue
+            except ScorerBusy as e:
+                unavailable = True
+                errors.append(f"{name}: unavailable ({e})")
                 continue
             except ScorerUnavailable as e:
                 unavailable = True
@@ -55,6 +61,7 @@ class ScorerChain:
                 continue
             except ScorerError as e:
                 errors.append(f"{name}: {e}")
+                self._unavailable[name] = 0
                 continue
             except Exception as e:
                 # A bug or an unexpected reply in one scorer must not stop the others from trying, and is not the

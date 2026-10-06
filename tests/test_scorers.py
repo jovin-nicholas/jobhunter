@@ -262,5 +262,56 @@ class TestReviewFixes(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
 
 
+class TestScorerBusy(unittest.TestCase):
+    """A scorer that is running but slow or failing on its side (a read timeout, HTTP 5xx) raises ScorerBusy: the job
+    is retried, but the scorer is not switched off for the run as one that is not running at all is."""
+
+    def test_a_busy_scorer_is_never_switched_off(self):
+        from jobhunter.errors import ScorerBusy
+        busy, backup = Fixed(ScorerBusy("timed out")), Fixed(7)
+        chain = ScorerChain([("ollama", busy), ("b", backup)], Decisions(8, 5))
+        outcomes = [chain.score(JOB, RESUME) for _ in range(5)]
+        self.assertEqual(busy.calls, 5)
+        self.assertEqual([n for o in outcomes for n in o.notes], [])
+
+    def test_a_busy_scorer_alone_is_retried_on_the_next_run(self):
+        from jobhunter.errors import ScorerBusy
+        outcome = ScorerChain([("ollama", Fixed(ScorerBusy("timed out")))], Decisions()).score(JOB, RESUME)
+        self.assertEqual(outcome.status, "error_unavailable")
+
+    def test_any_answer_resets_the_unavailable_count(self):
+        from jobhunter.errors import ScorerUnavailable
+
+        class Sequence:
+            def __init__(self, outcomes):
+                self.outcomes, self.calls = list(outcomes), 0
+
+            def score(self, job, resume):
+                self.calls += 1
+                raise self.outcomes.pop(0)
+        down = ScorerUnavailable("not reachable")
+        scorer = Sequence([down, down, ScorerError("garbled"), down, down, RateLimited("429"), down, down])
+        chain = ScorerChain([("ollama", scorer), ("b", Fixed(7))], Decisions(8, 5))
+        for _ in range(8):
+            chain.score(JOB, RESUME)
+        self.assertEqual(scorer.calls, 8)
+
+    def test_ollama_read_timeout_and_5xx_are_busy(self):
+        from jobhunter.errors import ScorerBusy
+        for effect in (requests.ReadTimeout("slow"), FakeResponse(status_code=503, text="overloaded")):
+            kw = {"side_effect": effect} if isinstance(effect, Exception) else {"return_value": effect}
+            with self.subTest(effect=effect), patch("jobhunter.scorers.ollama.requests.post", **kw):
+                with self.assertRaises(ScorerBusy):
+                    OllamaScorer({"model": "m"}).score(JOB, RESUME)
+
+    def test_ollama_not_running_is_not_busy(self):
+        from jobhunter.errors import ScorerBusy, ScorerUnavailable
+        for error in (requests.ConnectionError("refused"), requests.ConnectTimeout("no route")):
+            with self.subTest(error=error), patch("jobhunter.scorers.ollama.requests.post", side_effect=error):
+                with self.assertRaises(ScorerUnavailable) as caught:
+                    OllamaScorer({"model": "m"}).score(JOB, RESUME)
+                self.assertNotIsInstance(caught.exception, ScorerBusy)
+
+
 if __name__ == "__main__":
     unittest.main()

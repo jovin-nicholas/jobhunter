@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import requests
 
-from jobhunter.errors import RateLimited, ScorerError, ScorerUnavailable
+from jobhunter.errors import RateLimited, ScorerBusy, ScorerError, ScorerUnavailable
 from jobhunter.ollama_check import ollama_problem
 from jobhunter.models import Job, Resume, ScoreResult
 from jobhunter.registry import scorer
@@ -88,7 +88,7 @@ class OllamaScorer:
             raise ScorerUnavailable(f"Ollama has no model {self.options.model!r}: run `ollama pull "
                                     f"{self.options.model}` ({resp.text[:200]})")
         if resp.status_code >= 500:
-            raise ScorerUnavailable(f"Ollama returned HTTP {resp.status_code}: {resp.text[:200]}")
+            raise ScorerBusy(f"Ollama returned HTTP {resp.status_code}: {resp.text[:200]}")
         if resp.status_code != 200:
             raise ScorerError(f"Ollama returned HTTP {resp.status_code}: {resp.text[:200]}")
         try:
@@ -100,5 +100,9 @@ class OllamaScorer:
     def _post(self, url: str, body: dict) -> requests.Response:
         try:
             return requests.post(url, json=body, timeout=self.options.timeout_s)
+        except requests.ConnectionError as e:       # also ConnectTimeout: nothing is listening
+            raise ScorerUnavailable(f"Ollama not reachable at {self.options.url} ({e}); is `ollama serve` running?") from e
+        except requests.Timeout as e:               # connected, but no answer within timeout_s
+            raise ScorerBusy(f"Ollama did not answer within {self.options.timeout_s} s ({e})") from e
         except requests.RequestException as e:
             raise ScorerUnavailable(f"Ollama not reachable at {self.options.url} ({e}); is `ollama serve` running?") from e

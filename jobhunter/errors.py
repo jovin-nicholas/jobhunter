@@ -17,6 +17,11 @@ class ScorerUnavailable(ScorerError):
     """The scorer could not run at all (model not installed, server not running). The job is retried next run."""
 
 
+class ScorerBusy(ScorerUnavailable):
+    """The scorer is running but did not answer in time or failed on its side (a read timeout, HTTP 5xx). The job is
+    retried next run like any unavailable one, but the scorer is not switched off for the rest of the run."""
+
+
 class RateLimited(ScorerError):
     """The scorer's provider is rate-limiting. If every scorer fails, the job is retried on the next run."""
 
