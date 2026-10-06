@@ -73,6 +73,9 @@ BULLETS = ("-", "*", "\u2013", "\u2022")
 SKILL_LEADS = {"minimum", "min", "at", "least", "requires", "required", "require", "need", "needs", "must", "have",
                "a", "of"}
 ARTICLES = {"a", "an", "the"}               # "5 years of the company's history" (but "5+ years in a SaaS role")
+# "20+ years in business", "15 years in operation." ending the phrase: the company's age (but "5 years in business
+# operations" is a field).
+COMPANY_AGE = {"business", "operation", "existence"}
 _BLOCK_TAG = re.compile(r"<\s*(?:br|/?p|/?li|/?ul|/?ol|/?div|/?h[1-6]|/?tr)\b[^>]*>", re.I)
 _TAG = re.compile(r"<[a-zA-Z/!][^>]*>")
 LINE_HEADING_ENDS = {":", "-", "\u2013", "\u2014"}      # "Qualifications - 5+ years", "Requirements: 6 years"
@@ -206,6 +209,8 @@ def _judge(tokens: list[str], start: int, years_at: int, low: int, company: froz
         return "rejected"
     if tokens[years_at + 1:years_at + 4] == ["in", "a", "row"]:
         return "rejected"           # "Best Places to Work 8 years in a row, with a strong engineering culture"
+    if _company_age(tokens, years_at):
+        return "rejected"           # "20+ years in business, Acme is a leader"
     soft = before & PREFERRED_BEFORE
     if soft == {"typically"} and before & REQUIREMENT_LEADS:
         soft = set()                # "Typically requires 8+ years" is still a requirement
@@ -229,6 +234,13 @@ def _judge(tokens: list[str], start: int, years_at: int, low: int, company: froz
     if _skill_years(tokens, start, years_at) and ("+" in tokens[start:years_at] or listed):
         return "required"           # "8+ years of Java"; "- 5 years of Python"
     return "weak"
+
+
+def _company_age(tokens: list[str], years_at: int) -> bool:
+    """ "years in business", "years in operation" with nothing after but punctuation or the line's end."""
+    after = tokens[years_at + 1:years_at + 4]
+    return len(after) >= 2 and after[0] == "in" and after[1] in COMPANY_AGE and \
+        not (len(after) == 3 and after[2].isalpha())
 
 
 def _skill_years(tokens: list[str], start: int, years_at: int) -> bool:

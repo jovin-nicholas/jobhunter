@@ -451,3 +451,29 @@ class TestRequiredYearsFromBenchmark(unittest.TestCase):
         self.assertIsNone(required_years("Typically 6+ years of software engineering experience."))
         self.assertEqual(required_years("Typical day: you build APIs. Requires 3+ years of experience."), 3)
         self.assertEqual(required_years("Typically requires 8+ years of experience in the relevant technologies"), 8)
+
+
+
+class TestRequiredYearsCompanyAge(unittest.TestCase):
+    """ "20+ years in business" is the company's age; a "+" before "years" made it count as a requirement."""
+
+    def test_years_in_business_are_the_companys(self):
+        for text in ("Why Acme?\n- 20+ years in business",
+                     "- 10+ years in business, Acme is a leader",
+                     "- 15+ years in operation",
+                     "About us\n- 30+ years in existence."):
+            with self.subTest(text=text):
+                self.assertIsNone(required_years(text))
+
+    def test_a_field_named_business_still_counts(self):
+        self.assertEqual(required_years("Required Qualifications\nMinimum 5 years in business operations, "
+                                        "data analytics, BI development"), 5)
+        self.assertEqual(required_years("5+ years in business development"), 5)
+        self.assertEqual(required_years("5+ years in industry"), 5)
+
+    def test_plus_years_after_a_section_about_the_company_still_count(self):
+        # Live postings: the requirements often follow "About the Role", "Our Team" or "Who we are" with no heading.
+        self.assertEqual(required_years("About the Role\n10+ years in product management or a related role"), 10)
+        self.assertEqual(required_years("Our Team\n10+ years in MLOps, DevOps, or Cloud Infrastructure"), 10)
+        self.assertEqual(required_years("Who we are:\n8+ years in social media, creator marketing"), 8)
+        self.assertEqual(required_years("Responsibilities:\n- 5+ years of Python"), 5)
