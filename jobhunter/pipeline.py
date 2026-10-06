@@ -182,9 +182,13 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
             _process(app, job, boards[job.source], ctx, store, notifier, counts, dry_run, log, fetch_page, notified)
         except Exception as e:
             counts.errors += 1
-            log(f"ERROR [{job.source}] {job.title} at {job.company}: {e}")
+            # Tried again when a board lists it again, for RETRY_HOURS from when it was first saved; then final.
+            first = store.first_saved_at(job.id)
+            final = first is not None and datetime.now(timezone.utc) - first >= timedelta(hours=RETRY_HOURS)
+            status = "error_terminal" if final else "error"
+            log(f"{status.upper()} [{job.source}] {job.title} at {job.company}: {e}")
             if not dry_run:
-                store.save(job, "error")
+                store.save(job, status)
 
     for name, c in summary.items():
         detail = f"FAILED: {c.failed}" if c.failed else f"skipped: {c.skipped_reason}" if c.skipped_reason else (

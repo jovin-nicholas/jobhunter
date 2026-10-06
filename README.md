@@ -229,7 +229,9 @@ the run), `error_429_retry` (scored again when a board lists it again), `error_u
 board lists the job again; `error_notify` means no Slack or email channel delivered the alert, `error_scorer` that every
 scorer failed on the job; an `error_scorer` job more than 24 hours old that no board lists again keeps that status
 and is in effect final), `error_terminal` (a board listed an `error_scorer` job again more than 24 hours after it was
-first saved, and every scorer still failed on it; not retried), or `error` (processing the job crashed; tried again when a board lists it again).
+first saved, and every scorer still failed on it, or a board listed an `error` job again that long after and it crashed
+again; not retried), or `error` (processing the job crashed; tried again when a board lists it again, for up to 24 hours
+after it was first saved).
 A board that needs its own description (e.g. `vc_boards`) saves a job as `filtered` instead of retrying it forever,
 once the posting page gave no text for more than 6 hours or its URL is on a host that never allows automated
 reading (e.g. Indeed).

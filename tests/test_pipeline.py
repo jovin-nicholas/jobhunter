@@ -795,9 +795,6 @@ class TestVcCachePath(PipelineTestCase):
         self.assertEqual(seen[1].name, "vc_listings.json")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TestScorerErrorsAreRetriedForADay(PipelineTestCase):
     def test_a_job_every_scorer_failed_on_is_retried_then_final_after_24_hours(self):
@@ -841,3 +838,32 @@ class TestUndeliveredAlerts(PipelineTestCase):
         status = {k: v[0] for k, v in self.rows().items()}
         self.assertEqual((status["fake_0"], status["fake_enrich"]), ("notified", "notified"))
         self.assertEqual(sorted(s[0] for s in notifier.sent), ["fake_0", "fake_enrich"])
+
+
+class TestCrashesAreRetriedForADay(PipelineTestCase):
+    def test_a_job_that_crashes_is_retried_then_final_after_24_hours(self):
+        from unittest.mock import patch
+        import jobhunter.pipeline as pipeline
+        real = pipeline._process
+
+        def crash(app, job, *a, **kw):
+            if job.id == "fake_0":
+                raise RuntimeError("bug while processing")
+            return real(app, job, *a, **kw)
+        with patch.object(pipeline, "_process", side_effect=crash) as process:
+            self.run_once()
+            self.assertEqual(self.rows()["fake_0"][0], "error")
+            self.run_once()
+            self.assertEqual(self.rows()["fake_0"][0], "error")             # still inside its 24 hours
+            day_ago = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+            with closing(sqlite3.connect(self.store.path)) as conn, conn:
+                conn.execute("UPDATE jobs SET first_run_at = ? WHERE id = 'fake_0'", (day_ago,))
+            self.run_once()
+            self.assertEqual(self.rows()["fake_0"][0], "error_terminal")
+            calls = sum(1 for c in process.call_args_list if c.args[1].id == "fake_0")
+            self.run_once()
+            self.assertEqual(sum(1 for c in process.call_args_list if c.args[1].id == "fake_0"), calls)  # final
+
+
+if __name__ == "__main__":
+    unittest.main()
