@@ -1,5 +1,5 @@
 """Command line: python -m jobhunter [--settings PATH] run | check-config | list-boards | list-scorers |
-export-feedback | send-test-alert"""
+export-feedback | send-test-alert | tracker | tracker-import"""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from jobhunter.errors import SettingsError
+from jobhunter.http import Http
 from jobhunter.inbox import read_feedback
 from jobhunter.notify import Notifier
 from jobhunter.pipeline import bootstrap, run
@@ -22,6 +23,7 @@ from jobhunter.registry import build_registry
 from jobhunter.schedule import is_due, is_quiet, local_time, next_due, read_last_run, write_last_run
 from jobhunter.settings import NotifySettings, load_settings, settings_notes
 from jobhunter.store import Store
+from jobhunter.tracker.records import Applications
 
 
 def model_notes(app: Any) -> list[str]:
@@ -169,6 +171,20 @@ def _send_test_alert(settings: Any, store: Store) -> int:
     return 0
 
 
+def _tracker_import(apps: Applications, path: str, dry_run: bool) -> int:
+    from jobhunter.tracker.importing import import_csv
+    try:
+        report = import_csv(path, apps, dry_run=dry_run)
+    except OSError as e:
+        print(f"jobhunter: cannot read {path}: {e.strerror or e}", file=sys.stderr)
+        return 2
+    print(f"{'would add' if dry_run else 'added'} {report.added} application(s), {report.duplicates} already tracked"
+          + (f"; {len(report.problems)} row(s) skipped:" if report.problems else ""))
+    for problem in report.problems:
+        print(f"  {problem}")
+    return 0
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -189,6 +205,12 @@ def main(argv: list[str] | None = None) -> int:
     exp.add_argument("--out", help="output file (default: data/feedback_labels.csv next to the settings file)")
     exp.add_argument("--since", help="only verdicts on or after this date (YYYY-MM-DD)")
     sub.add_parser("send-test-alert", help="email yourself an alert for the last notified job, to try the buttons")
+    trk = sub.add_parser("tracker", help="open the application tracker in your browser (127.0.0.1 only)")
+    trk.add_argument("--port", type=int, default=8765, help="port to try first (default 8765; another when taken)")
+    trk.add_argument("--no-open", action="store_true", help="print the address instead of opening the browser")
+    tim = sub.add_parser("tracker-import", help="add applications kept elsewhere from a CSV, once")
+    tim.add_argument("path", help="CSV with columns company, title, applied_at (YYYY-MM-DD), and optionally url, stage")
+    tim.add_argument("--dry-run", action="store_true", help="report what would be added, write nothing")
     args = parser.parse_args(argv)
 
     settings_path = Path(args.settings).expanduser().resolve()
@@ -205,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name:16} {registry.origins[(kind, name)]}")
         return 0
 
-    if args.command in ("export-feedback", "send-test-alert"):
+    if args.command in ("export-feedback", "send-test-alert", "tracker", "tracker-import"):
         try:
             settings = load_settings(settings_path)
         except SettingsError as e:
@@ -213,6 +235,13 @@ def main(argv: list[str] | None = None) -> int:
         store = Store(settings.data_dir / "jobs.db")
         if args.command == "export-feedback":
             return _export_feedback(store, args.out or settings.data_dir / "feedback_labels.csv", args.since)
+        if args.command == "tracker":
+            from jobhunter.tracker.server import serve
+            serve(Applications(store), settings.tracker, port=args.port,
+                  http=Http() if settings.tracker.fetch_titles else None, open_browser=not args.no_open)
+            return 0
+        if args.command == "tracker-import":
+            return _tracker_import(Applications(store), args.path, args.dry_run)
         return _send_test_alert(settings, store)
 
     try:

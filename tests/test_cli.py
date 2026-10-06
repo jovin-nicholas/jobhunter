@@ -188,5 +188,37 @@ class TestFeedbackCommands(unittest.TestCase):
 
 
 
+class TestTrackerCommands(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.path = write_project(self.tmp, SETTINGS, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+
+    def test_tracker_import_reports_and_dry_run_writes_nothing(self):
+        sheet = self.tmp / "old.csv"
+        sheet.write_text("company,title,applied_at\nGlobex,Platform Engineer,2026-09-01\nInitech,SWE,9/2/2026\n")
+        code, out, _ = cli("--settings", str(self.path), "tracker-import", str(sheet), "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("would add 1 application(s)", out)
+        self.assertIn("line 3:", out)
+        code, out, _ = cli("--settings", str(self.path), "tracker-import", str(sheet))
+        self.assertIn("added 1 application(s)", out)
+        code, out, _ = cli("--settings", str(self.path), "tracker-import", str(sheet))
+        self.assertIn("added 0 application(s), 1 already tracked", out)
+
+    def test_tracker_import_of_a_missing_file(self):
+        code, _, err = cli("--settings", str(self.path), "tracker-import", str(self.tmp / "nope.csv"))
+        self.assertEqual(code, 2)
+        self.assertIn("nope.csv", err)
+
+    def test_tracker_serves_until_interrupted(self):
+        from unittest.mock import patch
+        with patch("jobhunter.tracker.server.TrackerServer.serve_forever", side_effect=KeyboardInterrupt), \
+             patch("webbrowser.open") as browser:
+            code, out, _ = cli("--settings", str(self.path), "tracker", "--port", "0")
+        self.assertEqual(code, 0)
+        self.assertIn("http://127.0.0.1:", out)
+        browser.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

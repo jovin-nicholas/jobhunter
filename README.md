@@ -168,6 +168,8 @@ that also has `generate(prompt) -> str` can write cover letters.
 | `list-boards`, `list-scorers` | Built-in and plugin boards and scorers, and where each comes from |
 | `export-feedback [--out FILE] [--since YYYY-MM-DD]` | Write each job's latest verdict from the alert buttons to a CSV (default `data/feedback_labels.csv`; columns `job_id,job_title,company,decision,verdict,received_at`) |
 | `send-test-alert` | Email yourself an alert for the last notified job, to try the feedback buttons |
+| `tracker [--port N] [--no-open]` | Open the application tracker in your browser (this computer only); Ctrl+C stops it |
+| `tracker-import FILE.csv [--dry-run]` | Add applications kept elsewhere, once; columns `company,title,applied_at` (YYYY-MM-DD), optionally `url,stage` |
 
 Each job is saved in `data/jobs.db` with a status: `notified`, `logged` or `skipped` (the score against `decisions`),
 `filtered` (with the filter's reason), `stale` or `gone` (a discovered posting too old, or no longer there), `duplicate`
@@ -198,6 +200,21 @@ training pools is a manual step; docs/settings.md, notify).
 
 To try it: `send-test-alert`, tap a button on your phone and send, `run --only <one board>` (the log shows
 `feedback: 1 saved`), then `export-feedback` shows the row.
+
+## Tracker
+
+`python -m jobhunter tracker` opens a page in your browser for the jobs you applied to: what needs you first (offers,
+interviews in the next 3 days, due follow-ups), then what is waiting, longest quiet first. Below it, the alerts of the
+last 14 days wait for review: `a` marks one applied, `b` a bad match (both are training labels, like the email
+buttons), `x` hides it. Paste a job link or type `Company — Title` to add one found elsewhere. Moving an application to
+a stage (`s` screen, `i` interview, `o` offer, `r` rejected, `w` withdrawn, `g` ghosted) sets its next follow-up, and
+every change can be undone for a few seconds. `v` shows reply rates by board, resume and fit, with how many
+applications each rests on. An ✅ Applied email becomes a tracked application on the next run.
+
+The page runs only on this computer (`127.0.0.1`, with a key in its address), works offline and keeps everything in
+`data/jobs.db`. It is not reachable from a phone; the email buttons are the phone path. Options are under `tracker:`
+in [docs/settings.md](docs/settings.md#tracker); applications kept in a spreadsheet can be brought in once with
+`tracker-import`.
 
 ## Known limitations
 
