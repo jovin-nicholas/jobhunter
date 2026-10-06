@@ -53,66 +53,29 @@ that fires every 15 minutes and let jobhunter decide when a run is due:
 ## Laya
 
 Laya is the default scorer: a local decision model, about 1 second per job on an Apple-silicon GPU (the first job also
-loads the model, about 5 s).
+loads it, about 5 s). `laya.model` is a Hugging Face id such as `convaiinnovations/laya`, downloaded on the first run,
+or the folder of a Laya you fine-tuned on your own job decisions. If Laya is not installed or its model is missing,
+jobs fall through to `ollama`, and `check-config` says what is missing.
 
-- `laya.model` is a Hugging Face id such as `convaiinnovations/laya`, downloaded on the first run, or the folder of a
-  Laya you fine-tuned on your own job decisions (`~/models/laya_finetuned`).
-- A local folder's `rl_agent_config.json` says how its decisions were trained (`question`, `from_score`, `alert` or
-  `questions`). The two older methods give a 1-10 score and `decisions:` in `jobhunter.yaml` decides from it; for
-  `from_score` the checkpoint's `score_thresholds` only choose how its answer is turned into that score. A Hugging
-  Face id uses the `question` method.
-- An alert checkpoint is fine-tuned on a single yes/no question (is this job worth an alert?) instead of a 1-10
-  score; it decides alert, save for later or skip itself, from its own `alert_at` / `save_at` cut-offs (see
-  `docs/settings.md`).
-- Alerts, run logs and `compare-db` show an alert checkpoint's result as "fit NN%" rather than a 1-10 score.
-- A questions checkpoint asks three questions instead: the job's stack role and whether it states a dealbreaker (on
-  the posting alone), then, only when the role is one of its `stack_roles` and the dealbreaker chance is below
-  `dealbreaker_at`, how good a fit the job is (1-10). A job that fails a gate is skipped, and the reason names the
-  gate. The fit is summarised as the expected score (`expected`) or the chance of a 7-10 (`p_good`), and compared
-  with the checkpoint's `alert_at` / `save_at`. All five can be overridden in `jobhunter.yaml` (see
-  `docs/settings.md`). Alerts and run logs show its result as "fit 6.42/10" (or "fit NN%" for `p_good`), with the side of the cut-off in words.
-- `check-config` prints the cut-offs an alert or questions checkpoint is using (and a questions checkpoint's gates),
-  and whether they come from the checkpoint or were overridden in `jobhunter.yaml`.
-- If Laya is not installed or its model folder is missing, jobs fall through to the next scorer (`ollama`). The run
-  log notes it once per run, and `check-config` says what is missing.
-- A job whose description could not be downloaded (the site refused or timed out) is not scored from its title; it
-  is saved as `error_unavailable` and tried again on the next run.
-- Fine-tuning your own checkpoint: [training/](training/) holds `laya_train.py` and two Colab notebooks, with
-  dependencies in `requirements-train.txt` (which includes `requirements-laya.txt`). Use `train_questions.ipynb`: it
-  trains a questions checkpoint (stack role, dealbreaker and fit); `train_alert.ipynb` trains the older
-  single-question alert checkpoint. Both ask for six files: `laya_train.py`, `jobhunter/posting.py`, your resume as
-  `scoring_resume.txt`, two pools of your own labelled jobs (`pool_old.jsonl`, `pool_jobhunter.jsonl`) and
-  `heldout_ids.txt` (job ids kept out of training). A pool is JSON lines with `job_id`, `title`, `company`,
-  `description`, `label` (notify, log or skip) and optionally `location`; the questions method also needs
-  `match_score` (1-10), `stack_role` and `dealbreaker` (text or null) on every row. `export-feedback`'s CSV is a
-  record of your verdicts, not a pool: building pools from it is a manual step today. Run the cells on a GPU, read
-  the report it prints, then download the single zip it writes and check it with `shasum -a 256 -c SHA256SUMS`. If
-  Colab disconnects, rerun the setup and data cells and the restore cell picks up the best saved epoch. Point
-  `laya.model` at the unzipped folder.
+A fine-tuned checkpoint can decide alert, save or skip by itself, with cut-offs you can override in `jobhunter.yaml`
+([docs/settings.md](docs/settings.md#scorers-required)); `check-config` prints the ones in use. To train your own, see
+[training/README.md](training/README.md).
 
 ## Ollama: choosing a local model
 
-`gemma4:e4b` is only a suggestion. Any Ollama model that fits your computer can score jobs and write cover letters:
-put its name in `ollama: {model: ...}` and run `ollama pull <name>`. Nothing is downloaded for you; `check-config`
-says when a model is missing or Ollama is not running. A model needs:
+`gemma4:e4b` is only a suggestion: any Ollama model that fits your computer can score jobs and write cover letters. Put
+its name in `ollama: {model: ...}` and run `ollama pull <name>`; `check-config` says when a model is missing or
+Ollama is not running, warns when the models in use need more memory than the computer can spare, and shows the free
+disk space when a model still has to be pulled. A model needs:
 
 - **About 4B parameters or more.** Smaller models often break the JSON answer or give every job the same score.
-- **A context window of at least 4,096 tokens.** A prompt is about 1,300 tokens with a one-page resume and the first
-  2,000 characters of a posting; raise `num_ctx` for a long resume.
-- **Free memory of about its download size plus 1-2 GB.** As a guide: 8 GB of RAM fits a 4B model such as
-  `qwen3:4b`; 16 GB fits `gemma4:e4b` (9.6 GB) or an 8B model such as `qwen3:8b`. Without a GPU (Apple silicon,
-  or NVIDIA with enough memory) expect a minute or more per job.
+- **A context window of at least 4,096 tokens** (raise `num_ctx` for a long resume).
+- **Free memory of about its download size plus 1-2 GB.** 8 GB of RAM fits `qwen3:4b`; 16 GB fits `gemma4:e4b`
+  (9.6 GB) or `qwen3:8b`. Without a GPU expect a minute or more per job.
 
-`check-config` also warns when a model, or all the models in use together (Laya, the scorer, the cover-letter writer
-and the System One model), need more memory than the computer can spare, and says how much disk space is free when a
-model still has to be pulled. A pull that runs out of disk space fails and leaves the model missing; free some space
-and pull it again.
-
-**Judging jobs and writing cover letters need different sizes.** For judging jobs, a 4B model is enough: on 60 test
-postings `qwen3:4b` (2.5 GB) picked good jobs as well as `gemma4:e4b` (9.6 GB), about 2.5 times faster. Cover
-letters need a larger model: in the same test `qwen3:4b` repeated numbers from the resume against the prompt's rules,
-reused one example twice and fell back on stock phrases, while `gemma4:e4b` followed the rules. So pick the scoring
-model to fit your computer, and if you turn cover letters on, give them the largest model it can run:
+Judging jobs needs less than writing cover letters: in a test on 60 postings `qwen3:4b` picked good jobs as well as
+`gemma4:e4b`, about 2.5 times faster, but wrote worse letters. So pick the scoring model to fit your computer and give
+cover letters the largest model it can run:
 
 ```yaml
 scorers:
@@ -123,44 +86,29 @@ cover_letters:
   options: {model: "gemma4:e4b"}        # writes the letters
 ```
 
-Models with and without a thinking mode both work: scoring turns thinking off, and cover letters turn it on only when
-the model supports it.
+## Optional filters
 
-### Optional: a System One checker
+Under `filters:` in `jobhunter.yaml` (every option is in [docs/settings.md](docs/settings.md#filters)):
 
-A local decision model can answer the questions the filters cannot: is this a software engineering role, is it only for
-current students, where is a job whose location names no place, and (optionally) does it require citizenship or a
-security clearance. Install Ollama 0.35 or later, run
-`ollama pull nimble:9b-q4_K_M` (5.6 GB), and add one line under `filters:`:
+- **A System One checker** answers what the rules cannot: is this a software engineering role, is it only for current
+  students, where is a job whose location names no place, and optionally does it require citizenship or a clearance.
+  It needs Ollama 0.35 or later and `ollama pull nimble:9b-q4_K_M` (5.6 GB); only the job is sent, never your resume.
 
-```yaml
+  ```yaml
   systemone: {model: "nimble:9b-q4_K_M", skip_if: [citizenship, clearance]}   # skip_if is optional
-```
+  ```
 
-Each question is a separate request about the job only (nothing from your resume is sent), about 3-5 seconds each
-on an Apple-silicon Mac. The location question is asked only when the location rules cannot decide; the others only
-for jobs the other filters kept. If the model is missing or slow, the run log says so once and jobs go on to the
-scorers as usual. Details are in [docs/settings.md](docs/settings.md#systemone).
+- **Contract and hourly jobs** are recognised from the title and description, since no board reports employment type:
+  "contract" or "freelance" in the title, wording such as "C2C", "W2 only", "6-month contract" or "you will be paid on
+  a 1099 basis", and a dollar rate such as "$55/hr". A product that handles contracts or 1099s ("smart contracts",
+  "Form 1099 processing") does not count. A skipped job is saved as `filtered` with the matched words as its reason.
 
-### Optional: skip contract and hourly jobs
-
-No board says whether a job is a contract or paid by the hour, so the `employment` filter reads the title and
-description for it, before any model runs:
-
-```yaml
+  ```yaml
   employment:
     exclude: [contract, hourly]   # either or both
     contract_to_hire: keep        # or exclude
     hourly_internships: keep      # or exclude
-```
-
-Contract wording includes "contract", "contractor", "temporary" or "freelance" in the title, and "contractor role",
-"independent contractor", "C2C", "1099 contract" / "1099 only" / "on 1099", "W2 only" / "only W2", "6-month contract"
-and "employment type: contract" anywhere; a bare "1099" ("Form 1099 processing") and "smart contract" never count.
-Hourly means a rate in dollars such as "$55/hr", "$50-60 per hour" or "USD 40 per hour" (not "the salary or hourly
-rate offered", and not a number without a currency in the description, such as "10,000/hr transactions"; in the
-title "65/hr" is enough). A skipped job is saved as `filtered` with the matched words as its reason, e.g. "contract: c2c". Details
-are in [docs/settings.md](docs/settings.md).
+  ```
 
 ## Boards
 
@@ -216,8 +164,6 @@ that also has `generate(prompt) -> str` can write cover letters.
 | `run [--only dice,greenhouse] [--dry-run] [--scheduled]` | Search, filter, score, save and notify; `--dry-run` saves and sends nothing; `--scheduled` honours `schedule:` |
 | `check-config` | Validate settings, plugins and resumes, then exit |
 | `list-boards`, `list-scorers` | Built-in and plugin boards and scorers, and where each comes from |
-| `import-db PATH` | Copy jobs from a job-notifier database so none is scored or notified again |
-| `compare-db PATH [--since YYYY-MM-DD]` | For jobs both apps decided: how often they agree, and where they differ |
 | `export-feedback [--out FILE] [--since YYYY-MM-DD]` | Write each job's latest verdict from the alert buttons to a CSV (default `data/feedback_labels.csv`; columns `job_id,job_title,company,decision,verdict,received_at`) |
 | `send-test-alert` | Email yourself an alert for the last notified job, to try the feedback buttons |
 
@@ -252,21 +198,10 @@ pools is a manual step; docs/settings.md, notify).
 To try it: `send-test-alert`, tap a button on your phone and send, `run --only <one board>` (the log shows
 `feedback: 1 saved`), then `export-feedback` shows the row.
 
-## Moving from job-notifier
-
-1. Copy your resumes into `resumes/` and your `.env`; start from `examples/full.yaml`; run `check-config`.
-2. Run jobhunter for a day next to job-notifier with notifications off (leave out `notify:`), so both see the same jobs.
-3. `python -m jobhunter compare-db ../job-notifier/data/jobs.db` shows how often both made the same decision, and the
-   jobs where they differ. Compare before importing: after step 4 the imported jobs match themselves.
-4. `python -m jobhunter import-db ../job-notifier/data/jobs.db` copies every job job-notifier already handled, so
-   none is notified twice. A job jobhunter had left for retry takes job-notifier's final status. The old database is
-   opened read-only and not changed; SQLite may leave empty `jobs.db-wal` / `jobs.db-shm` files next to it.
-5. Turn notifications on and switch the cron entry to `run_cron.sh`.
-
 ## Known limitations
 
 - The same posting found on two boards (for example Stripe through `top_companies` and through `greenhouse`) is two
-  jobs, and Workday job ids do not include the company; both keep job ids identical to job-notifier's.
+  jobs (one alert, since alerts match on title and company), and Workday job ids do not include the company.
 - Lever and Ashby name a company by its board's address (`scaleai`), other boards by its display name ("Scale AI"),
   so the same role found on Lever or Ashby and on another board can be notified twice.
 - A site's DNS answer is checked before a page download but could change in between (DNS rebinding); for a
