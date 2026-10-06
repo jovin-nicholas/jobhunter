@@ -72,6 +72,12 @@ class TestSecurity(ServerTestCase):
     def test_a_huge_body_is_refused(self):
         self.assertEqual(self.call("POST", "/api/applications", {"text": "x" * 70000})[0], 400)
 
+    def test_a_query_token_is_accepted_only_for_the_csv_export(self):
+        self.assertEqual(self.call("GET", "/api/state?t=secret-token", token=None)[0], 403)
+        self.assertEqual(self.call("POST", "/api/applications?t=secret-token",
+                                   {"text": "Globex — Platform Engineer"}, token=None)[0], 403)
+        self.assertEqual(self.apps.all(), [])
+
 
 class TestApi(ServerTestCase):
     def test_quick_add_matches_a_stored_job_with_and_without_its_query(self):

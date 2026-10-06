@@ -125,7 +125,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, page_html(), "text/html; charset=utf-8")
         if not parts.path.startswith("/api/"):
             return self._json(404, {"error": "not found"})
-        given = self.headers.get(TOKEN_HEADER) or (parse_qs(parts.query).get("t") or [""])[0]
+        if method == "GET" and parts.path == "/api/export.csv":
+            given = self.headers.get(TOKEN_HEADER) or (parse_qs(parts.query).get("t") or [""])[0]
+        else:
+            given = self.headers.get(TOKEN_HEADER) or ""
         if not hmac.compare_digest(given.encode(), self.server.token.encode()):
             return self._json(403, {"error": "missing or wrong token"})
         try:
