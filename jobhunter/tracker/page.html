@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Applications · jobhunter</title>
+<style>
+:root {
+  --paper: #f7f5f0; --ink: #1c1b19; --muted: #6b675f; --rule: #e3dfd6; --raised: #fffdf8;
+  --accent: #1f6f50; --accent-soft: #e4efe9; --focus: #1f6f50;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #161513; --ink: #ece8df; --muted: #a29d92; --rule: #2e2b27; --raised: #1f1d1a;
+          --accent: #5fbf94; --accent-soft: #1f3329; --focus: #5fbf94; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.45 var(--sans); }
+.num, kbd, time, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+header { position: sticky; top: 0; background: var(--paper); border-bottom: 1px solid var(--rule); padding: 12px 20px; z-index: 2; }
+.bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.brand { font-weight: 600; letter-spacing: .02em; margin-right: 8px; }
+#quick { flex: 1 1 320px; min-width: 0; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--raised); }
+#search { flex: 1 1 200px; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 6px; background: var(--raised); }
+.link { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 6px; text-decoration: underline dotted; }
+.link.on, .link:hover { color: var(--ink); }
+.pipeline { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; color: var(--muted); font-size: 13px; }
+.pipeline button { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; }
+.pipeline button.on { color: var(--ink); text-decoration: underline; }
+.strip { display: flex; height: 6px; margin-top: 6px; border-radius: 3px; overflow: hidden; background: var(--rule); }
+.strip span { background: var(--accent); opacity: .85; }
+.strip span + span { border-left: 2px solid var(--paper); }
+main { padding: 8px 20px 80px; }
+body.drawer-open main { margin-right: 380px; }
+h2 { font-size: 11px; font-variant: small-caps; text-transform: lowercase; letter-spacing: .08em; color: var(--muted);
+     margin: 22px 0 4px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+h2 .count { font-family: var(--mono); }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 8px 4px; }
+td { height: 32px; padding: 0 8px; border-top: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+tr.row { cursor: pointer; }
+tr.row:hover td { background: var(--raised); }
+tr.row.focus td { background: var(--accent-soft); }
+tr.closed td { color: var(--muted); }
+.dot { width: 110px; } .company { width: 22%; } .stage { width: 90px; } .age { width: 70px; text-align: right; }
+.fit { width: 90px; } .board { width: 110px; color: var(--muted); } .acts { width: 210px; text-align: right; }
+.mark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); margin-right: 6px; vertical-align: middle; }
+.mark.on { background: var(--accent); border-color: var(--accent); }
+.reason { font-size: 12px; }
+.acts button, .stages button, .small { border: 1px solid var(--rule); background: var(--raised); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+.acts button + button { margin-left: 4px; }
+kbd { font-size: 11px; color: var(--muted); }
+.empty { color: var(--muted); padding: 10px 8px; }
+.few { color: var(--muted); }
+.bar-cell { display: inline-block; height: 6px; background: var(--accent); border-radius: 3px; vertical-align: middle; margin-left: 6px; }
+#drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; background: var(--raised); border-left: 1px solid var(--rule);
+          box-shadow: -8px 0 24px rgba(0,0,0,.06); padding: 18px 20px; overflow-y: auto; z-index: 3; transition: transform .15s ease-out; }
+#drawer[hidden] { display: block; transform: translateX(100%); visibility: hidden; }
+#drawer .close { position: absolute; top: 10px; right: 12px; background: none; border: 0; font-size: 20px; cursor: pointer; color: var(--muted); }
+.eyebrow { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
+.edit { display: block; width: 100%; border: 1px solid transparent; background: transparent; padding: 2px 4px; margin: 0 -4px; border-radius: 4px; }
+.edit:hover, .edit:focus { border-color: var(--rule); background: var(--paper); }
+.edit.big { font-size: 18px; font-weight: 600; }
+.stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+.stages button.on { border-color: var(--accent); color: var(--accent); }
+label.field { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
+label.field input, label.field textarea { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); color: var(--ink); }
+textarea { min-height: 90px; resize: vertical; }
+.timeline { list-style: none; padding: 0; margin: 16px 0 0; border-top: 1px solid var(--rule); }
+.timeline li { padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+.timeline time { color: var(--muted); margin-right: 10px; }
+pre.jd { white-space: pre-wrap; font: 13px/1.5 var(--sans); background: var(--paper); padding: 10px; border-radius: 5px; }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--paper);
+         padding: 8px 14px; border-radius: 6px; display: flex; gap: 12px; align-items: center; transition: opacity .15s; z-index: 4; }
+#toast[hidden] { display: flex; opacity: 0; pointer-events: none; }
+#toast button { background: none; border: 0; color: var(--paper); text-decoration: underline; cursor: pointer; }
+#help { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; z-index: 5; }
+#help[hidden] { display: none; }
+#help .card { background: var(--raised); padding: 20px 24px; border-radius: 8px; max-width: 420px; }
+#help dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; }
+.notice { max-width: 560px; margin: 80px auto; color: var(--muted); }
+@media (max-width: 900px) {
+  body.drawer-open main { margin-right: 0; }
+  #drawer { width: 100%; }
+  .board, .fit { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { #drawer, #toast { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span class="brand">jobhunter · applications</span>
+    <input id="quick" type="text" autocomplete="off" aria-label="Add an application"
+           placeholder="Paste a job link, or type Company — Title, then Enter">
+    <input id="search" type="search" aria-label="Search applications" placeholder="Search company, title, notes" hidden>
+    <button class="link" id="view-list" type="button">list</button>
+    <button class="link" id="view-numbers" type="button">numbers <kbd>v</kbd></button>
+    <a class="link" id="export" download="applications.csv">export</a>
+    <button class="link" id="help-open" type="button" aria-label="Keyboard shortcuts">?</button>
+  </div>
+  <div class="pipeline" id="pipeline"></div>
+  <div class="strip" id="strip" aria-hidden="true"></div>
+</header>
+<main id="main"></main>
+<aside id="drawer" hidden aria-label="Application details"></aside>
+<div id="toast" hidden role="status"></div>
+<div id="help" hidden role="dialog" aria-label="Keyboard shortcuts">
+  <div class="card">
+    <dl>
+      <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>move down and up</dd>
+      <dt><kbd>Enter</kbd> <kbd>Esc</kbd></dt><dd>open and close details</dd>
+      <dt><kbd>s</kbd> <kbd>i</kbd> <kbd>o</kbd></dt><dd>screen, interview, offer</dd>
+      <dt><kbd>r</kbd> <kbd>w</kbd> <kbd>g</kbd></dt><dd>rejected, withdrawn, ghosted</dd>
+      <dt><kbd>n</kbd> <kbd>f</kbd> <kbd>d</kbd></dt><dd>notes, set follow-up, follow-up done</dd>
+      <dt><kbd>a</kbd> <kbd>b</kbd> <kbd>x</kbd></dt><dd>to review: applied, bad match, hide</dd>
+      <dt><kbd>v</kbd></dt><dd>list or numbers</dd>
+      <dt><kbd>⌘K</kbd> / <kbd>Ctrl K</kbd></dt><dd>search</dd>
+    </dl>
+  </div>
+</div>
+<script>
+"use strict";
+const TOKEN = (() => {
+  const given = new URLSearchParams(location.search).get("t");
+  try {
+    if (given) sessionStorage.setItem("jh-token", given);
+    if (given) history.replaceState(null, "", "/");
+    return given || sessionStorage.getItem("jh-token");
+  } catch (e) { return given; }
+})();
+const STAGE_KEYS = {s: "screen", i: "interview", o: "offer", r: "rejected", w: "withdrawn", g: "ghosted"};
+const KEY_OF = Object.fromEntries(Object.entries(STAGE_KEYS).map(([k, s]) => [s, k]));
+let state = null, view = "list", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
+let visible = [];          // rows j/k move through: {type: "app", id} or {type: "review", job_id}
+let toastTimer = null;
+
+function el(tag, props = {}, ...kids) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (key === "class") node.className = value;
+    else if (key === "on") for (const [event, fn] of Object.entries(value)) node.addEventListener(event, fn);
+    else if (key === "value") node.value = value;
+    else if (value !== undefined && value !== null && value !== false) node.setAttribute(key, value === true ? "" : value);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    node.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+}
+function safeHref(url) { return /^https?:\/\//i.test(url || "") ? url : null; }
+function kids(...nodes) { return nodes.flat().filter(n => n !== null && n !== undefined && n !== false); }
+
+async function api(method, path, body) {
+  const resp = await fetch(path, {method, headers: {"X-Tracker-Token": TOKEN || "", "Content-Type": "application/json"},
+                                  body: body === undefined ? undefined : JSON.stringify(body)});
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+  return data;
+}
+async function refresh() {
+  try { state = await api("GET", "/api/state"); }
+  catch (e) { showNotice(`Could not load the tracker (${e.message}). Open the address the jobhunter tracker command printed.`); return; }
+  render();
+}
+function showNotice(text) { document.getElementById("main").replaceChildren(el("p", {class: "notice"}, text)); }
+
+function daysBetween(fromIso, toIso) { return Math.round((Date.parse(toIso.slice(0, 10)) - Date.parse(fromIso.slice(0, 10))) / 86400000); }
+function ago(days) { return days <= 0 ? "today" : `${days}d`; }
+function until(iso) {
+  const d = daysBetween(state.today, iso);
+  return d < 0 ? `${-d}d late` : d === 0 ? "today" : d === 1 ? "tmrw" : `in ${d}d`;
+}
+function fmt(iso) { return new Date(iso.slice(0, 10) + "T12:00:00").toLocaleDateString(undefined, {month: "short", day: "numeric", year: "numeric"}); }
+function allApps() { return state ? [...state.groups.needs, ...state.groups.waiting, ...state.groups.closed] : []; }
+function findApp(id) { return allApps().find(a => a.id === id) || null; }
+function matches(a) {
+  if (stageFilter && a.stage !== stageFilter) return false;
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return [a.company, a.title, a.notes, a.people].some(v => (v || "").toLowerCase().includes(q));
+}
+
+function render() {
+  if (!state) return;
+  renderPipeline();
+  document.getElementById("view-list").classList.toggle("on", view === "list");
+  document.getElementById("view-numbers").classList.toggle("on", view === "numbers");
+  document.getElementById("export").setAttribute("href", `/api/export.csv?t=${encodeURIComponent(TOKEN || "")}`);
+  const main = document.getElementById("main");
+  main.replaceChildren(...(view === "numbers" ? renderNumbers() : renderList()));
+  markCursor();
+  renderDrawer();
+}
+function renderPipeline() {
+  const open = state.open_stages, closed = state.closed_stages, counts = state.counts;
+  const total = open.reduce((sum, s) => sum + counts[s], 0);
+  const button = s => el("button", {type: "button", class: stageFilter === s ? "on" : "",
+    on: {click: () => { stageFilter = stageFilter === s ? null : s; view = "list"; render(); }}},
+    `${s} `, el("span", {class: "num"}, counts[s]));
+  document.getElementById("pipeline").replaceChildren(
+    ...open.flatMap((s, i) => i < open.length - 1 ? [button(s), el("span", {"aria-hidden": "true"}, "▸")] : [button(s)]),
+    el("span", {style: "margin-left:auto"}), ...closed.map(button));
+  document.getElementById("strip").replaceChildren(
+    ...open.filter(s => counts[s]).map(s => el("span", {style: `flex:${counts[s]}`, title: `${s} ${counts[s]}`})));
+  if (!total) document.getElementById("strip").replaceChildren();
+}
+function header(...cols) { return el("thead", {}, el("tr", {}, cols.map(([label, cls]) => el("th", {class: cls, scope: "col"}, label)))); }
+function appRow(a) {
+  const due = a.due ? until(a.due) : ago(a.age_days);
+  return el("tr", {class: `row${state.closed_stages.includes(a.stage) ? " closed" : ""}`, "data-key": `app:${a.id}`,
+                   on: {click: () => { openId = a.id; cursor = visible.findIndex(v => v.type === "app" && v.id === a.id); render(); }}},
+    el("td", {class: "dot"}, el("span", {class: a.reason ? "mark on" : "mark", "aria-hidden": "true"}),
+       el("span", {class: "reason"}, a.reason || "")),
+    el("td", {class: "company"}, a.company || "—"),
+    el("td", {class: "title", title: a.title}, a.title || "—"),
+    el("td", {class: "stage"}, a.stage),
+    el("td", {class: "age num"}, due),
+    el("td", {class: "fit num"}, a.fit || ""),
+    el("td", {class: "board"}, a.board || ""));
+}
+function reviewRow(r) {
+  const act = (label, key, action) => el("button", {type: "button", on: {click: e => { e.stopPropagation(); review(r.job_id, action); }}},
+                                          el("kbd", {}, key), " ", label);
+  return el("tr", {class: "row", "data-key": `review:${r.job_id}`,
+                   on: {click: () => { cursor = visible.findIndex(v => v.type === "review" && v.job_id === r.job_id); markCursor(); }}},
+    el("td", {class: "company"}, r.company || "—"),
+    el("td", {class: "title", title: r.title}, r.title || "—"),
+    el("td", {class: "age num"}, ago(daysBetween(r.alerted_at, state.today))),
+    el("td", {class: "fit num"}, r.fit || ""),
+    el("td", {class: "acts"}, safeHref(r.url) ? el("a", {href: safeHref(r.url), target: "_blank", rel: "noopener noreferrer"}, "open") : null,
+       " ", act("applied", "a", "applied"), act("bad", "b", "bad"), act("hide", "x", "hide")));
+}
+function group(title, apps, opts = {}) {
+  const head = el("h2", {}, title, " · ", el("span", {class: "count"}, apps.length), opts.toggle || null);
+  if (opts.collapsed) return [head];
+  if (!apps.length) return opts.empty ? [head, el("p", {class: "empty"}, opts.empty)] : [];
+  return [head, el("table", {}, header(["", "dot"], ["company", "company"], ["title", "title"], ["stage", "stage"],
+                                       ["age", "age"], ["fit", "fit"], ["board", "board"]),
+                   el("tbody", {}, apps.map(appRow)))];
+}
+function renderList() {
+  const g = state.groups;
+  const needs = g.needs.filter(matches), waiting = g.waiting.filter(matches), closed = g.closed.filter(matches);
+  const review = query || stageFilter ? [] : state.review;
+  visible = [...needs, ...waiting, ...(showClosed ? closed : [])].map(a => ({type: "app", id: a.id}))
+    .concat(review.map(r => ({type: "review", job_id: r.job_id})));
+  const nothing = !allApps().length;
+  const closedToggle = el("button", {type: "button", class: "link", on: {click: () => { showClosed = !showClosed; render(); }}},
+                          showClosed ? "hide" : "show");
+  const parts = [
+    ...group("needs you", needs),
+    ...group("waiting", waiting),
+    ...(closed.length ? group("closed", closed, {collapsed: !showClosed, toggle: closedToggle}) : []),
+  ];
+  if (!query && !stageFilter) {
+    parts.push(el("h2", {}, "to review · ", el("span", {class: "count"}, review.length),
+                  ` alerts from the last ${state.settings.review_days} days`));
+    parts.push(review.length
+      ? el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "age"], ["fit", "fit"], ["", "acts"]),
+           el("tbody", {}, review.map(reviewRow)))
+      : el("p", {class: "empty"}, "No recent alerts to review."));
+    if (nothing) parts.unshift(el("p", {class: "empty"}, "Mark the alerts you applied to with ", el("kbd", {}, "a"),
+                                  ", or paste a job link above."));
+  }
+  return parts;
+}
+function renderNumbers() {
+  const n = state.numbers;
+  const pct = r => r.rate === null ? "—" : `${Math.round(r.rate * 100)}%`;
+  const table = (title, rows) => [el("h2", {}, title), el("table", {}, header(["", "company"], ["replied", "age"], ["n", "age"], ["", "title"]),
+    el("tbody", {}, rows.map(r => el("tr", {class: r.few ? "few" : ""},
+      el("td", {}, r.label || "all"), el("td", {class: "age num"}, pct(r)), el("td", {class: "age num"}, r.n),
+      el("td", {}, r.few ? "too few" : el("span", {class: "bar-cell", style: `width:${Math.round((r.rate || 0) * 160)}px`}))))))];
+  return [
+    ...table("reply rate (screen or further)", [n.overall]),
+    ...table("by board", n.by_board), ...table("by resume", n.by_resume),
+    ...table("by fit band", n.by_fit), ...table("by week applied", n.by_week),
+    el("h2", {}, "median days to first reply"),
+    el("p", {class: "num"}, n.median_days_to_reply === null ? "—" : `${n.median_days_to_reply} days, from ${n.replies_counted} replies`),
+  ];
+}
+
+function renderDrawer() {
+  const drawer = document.getElementById("drawer");
+  const a = openId === null ? null : findApp(openId);
+  document.body.classList.toggle("drawer-open", !!a);
+  drawer.hidden = !a;
+  if (!a) { drawer.replaceChildren(); return; }
+  const stages = state.stages.map(s => el("button", {type: "button", class: s === a.stage ? "on" : "",
+    on: {click: () => setStage(a.id, s)}}, KEY_OF[s] ? el("kbd", {}, KEY_OF[s]) : null, KEY_OF[s] ? " " : null, s));
+  const follow = el("input", {type: "date", id: "follow-up", value: a.follow_up_at || "",
+    on: {change: e => e.target.value && act(`/api/applications/${a.id}/follow-up`, {date: e.target.value}, "Follow-up set")}});
+  drawer.replaceChildren(...kids(
+    el("button", {type: "button", class: "close", "aria-label": "Close", on: {click: closeDrawer}}, "×"),
+    el("p", {class: "eyebrow"}, [a.board, a.fit, a.resume_id && `resume: ${a.resume_id}`].filter(Boolean).join(" · ")),
+    editable(a, "company", "edit big", "Company"), editable(a, "title", "edit", "Title"),
+    safeHref(a.url) ? el("p", {}, el("a", {href: safeHref(a.url), target: "_blank", rel: "noopener noreferrer"}, "Open the posting ↗")) : null,
+    el("div", {class: "stages"}, stages),
+    el("label", {class: "field"}, "Follow up on", follow),
+    a.follow_up_at ? el("button", {type: "button", class: "small", on: {click: () => act(`/api/applications/${a.id}/follow-up`, {done: true}, "Follow-up done")}},
+                        el("kbd", {}, "d"), " done") : null,
+    el("label", {class: "field"}, "Applied on", editable(a, "applied_at", "", "Applied on", "date")),
+    el("label", {class: "field"}, "People", editable(a, "people", "", "Jane at Acme, recruiter")),
+    el("label", {class: "field"}, "Notes", editable(a, "notes", "", "", "textarea")),
+    el("ol", {class: "timeline", reversed: true}, [...a.events].reverse().map(e => el("li", {},
+      el("time", {datetime: e.at}, fmt(e.at)),
+      e.kind === "stage" ? e.value : e.kind === "follow_up_set" ? `follow up on ${fmt(e.value)}` : "follow-up done"))),
+    a.job_id ? el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showDescription(a.id, e.target)}}, "Show job description")) : null));
+}
+function editable(a, field, cls, placeholder, kind = "text") {
+  const props = {class: cls, id: `field-${field}`, value: a[field] || "", placeholder, "aria-label": placeholder || field,
+    on: {change: e => save(a.id, field, e.target.value)}};
+  return kind === "textarea" ? el("textarea", props) : el("input", {...props, type: kind});
+}
+async function save(id, field, value) {
+  try { await api("POST", `/api/applications/${id}`, {[field]: value}); await refresh(); }
+  catch (e) { toast(`Not saved: ${e.message}`); }
+}
+async function showDescription(id, button) {
+  const {text} = await api("GET", `/api/applications/${id}/description`);
+  button.replaceWith(el("pre", {class: "jd"}, text || "No description was stored for this job."));
+}
+function closeDrawer() { openId = null; render(); }
+
+async function act(path, body, message) {
+  try { const r = await api("POST", path, body); await refresh(); if (r.event_ids) toast(message, r.event_ids); }
+  catch (e) { toast(`Failed: ${e.message}`); }
+}
+function setStage(id, stage) { return act(`/api/applications/${id}/stage`, {stage}, `Moved to ${stage}`); }
+async function review(jobId, action) {
+  try {
+    const r = await api("POST", "/api/review", {job_id: jobId, action});
+    await refresh();
+    toast(action === "applied" ? "Marked applied" : action === "bad" ? "Marked a bad match" : "Hidden");
+    if (action === "applied" && r.id) { openId = r.id; render(); }
+  } catch (e) { toast(`Failed: ${e.message}`); }
+}
+function toast(message, undoIds) {
+  const box = document.getElementById("toast");
+  clearTimeout(toastTimer);
+  box.replaceChildren(...kids(el("span", {}, message), undoIds && undoIds.length ? el("button", {type: "button", on: {click: async () => {
+    box.hidden = true; await api("POST", "/api/events/delete", {ids: undoIds}); await refresh(); }}}, "Undo") : null));
+  box.hidden = false;
+  toastTimer = setTimeout(() => { box.hidden = true; }, 6000);
+}
+
+function markCursor() {
+  document.querySelectorAll("tr.row.focus").forEach(r => r.classList.remove("focus"));
+  if (!visible.length) return;
+  cursor = Math.max(0, Math.min(cursor, visible.length - 1));
+  const v = visible[cursor];
+  const row = document.querySelector(`tr[data-key="${v.type === "app" ? `app:${v.id}` : `review:${CSS.escape(v.job_id)}`}"]`);
+  if (row) { row.classList.add("focus"); row.scrollIntoView({block: "nearest"}); }
+}
+function target() { const v = visible[cursor]; return openId !== null ? openId : v && v.type === "app" ? v.id : null; }
+function focusField(id) {
+  const t = target();
+  if (t === null) return;
+  if (openId !== t) { openId = t; render(); }
+  const node = document.getElementById(id);
+  if (node) node.focus();
+}
+
+document.getElementById("quick").addEventListener("keydown", async e => {
+  if (e.key !== "Enter" || !e.target.value.trim()) return;
+  try {
+    const {id} = await api("POST", "/api/applications", {text: e.target.value});
+    e.target.value = ""; openId = id; await refresh();
+    const a = findApp(id);
+    if (a && !a.title) document.getElementById("field-title").focus();
+    else if (a && !a.company) document.getElementById("field-company").focus();
+  } catch (err) { toast(err.message); }
+});
+document.getElementById("search").addEventListener("input", e => { query = e.target.value.trim(); render(); });
+document.getElementById("view-list").addEventListener("click", () => { view = "list"; render(); });
+document.getElementById("view-numbers").addEventListener("click", () => { view = "numbers"; render(); });
+document.getElementById("help-open").addEventListener("click", () => { document.getElementById("help").hidden = false; });
+document.getElementById("help").addEventListener("click", () => { document.getElementById("help").hidden = true; });
+window.addEventListener("popstate", closeDrawer);
+
+document.addEventListener("keydown", e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    const search = document.getElementById("search");
+    search.hidden = false; search.focus();
+    return;
+  }
+  if (e.key === "Escape") {
+    if (typing) e.target.blur();
+    document.getElementById("help").hidden = true;
+    if (openId !== null) closeDrawer();
+    return;
+  }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey || !state) return;
+  const v = visible[cursor];
+  if (e.key === "j" || e.key === "k") { cursor += e.key === "j" ? 1 : -1; markCursor(); return; }
+  if (e.key === "Enter" && v && v.type === "app") { openId = v.id; render(); return; }
+  if (e.key === "?") { document.getElementById("help").hidden = false; return; }
+  if (e.key === "v") { view = view === "list" ? "numbers" : "list"; render(); return; }
+  if ("abx".includes(e.key) && v && v.type === "review") { review(v.job_id, {a: "applied", b: "bad", x: "hide"}[e.key]); return; }
+  if (e.key === "n") { e.preventDefault(); focusField("field-notes"); return; }
+  if (e.key === "f") { e.preventDefault(); focusField("follow-up"); return; }
+  const t = target();
+  if (e.key === "d" && t !== null && findApp(t) && findApp(t).follow_up_at) { act(`/api/applications/${t}/follow-up`, {done: true}, "Follow-up done"); return; }
+  if (STAGE_KEYS[e.key] && t !== null) setStage(t, STAGE_KEYS[e.key]);
+});
+
+if (TOKEN) refresh();
+else showNotice("This page needs the address the jobhunter tracker command printed (it ends in ?t=…). Run `jobhunter tracker` again to get it.");
+</script>
+</body>
+</html>
