@@ -44,6 +44,13 @@ class TestPage(unittest.TestCase):
     def test_a_review_action_can_be_undone(self):
         self.assertIn('"/api/review/undo"', self.text)
 
+    def test_back_closes_the_drawer_and_closing_does_not_pile_up_history(self):
+        self.assertIn('history.pushState({drawer: id}, "")', self.text)
+        self.assertRegex(self.text, r'function closeDrawer\(\) \{[^}]*history\.state[^}]*history\.back\(\)')
+        self.assertNotIn('addEventListener("popstate", closeDrawer)', self.text)   # back must not call back again
+        self.assertNotRegex(self.text, r"openId = (a\.id|v\.id|t|r\.id);")          # every open goes through openDrawer
+        self.assertEqual(self.text.count("openId = id;"), 1)
+
     def test_it_follows_the_colour_scheme_and_reduced_motion(self):
         self.assertIn("prefers-color-scheme: dark", self.text)
         self.assertIn("prefers-reduced-motion", self.text)

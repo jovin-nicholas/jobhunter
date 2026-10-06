@@ -216,7 +216,7 @@ function header(...cols) { return el("thead", {}, el("tr", {}, cols.map(([label,
 function appRow(a) {
   const due = a.due ? until(a.due) : ago(a.age_days);
   return el("tr", {class: `row${state.closed_stages.includes(a.stage) ? " closed" : ""}`, "data-key": `app:${a.id}`,
-                   on: {click: () => { openId = a.id; cursor = visible.findIndex(v => v.type === "app" && v.id === a.id); render(); }}},
+                   on: {click: () => { cursor = visible.findIndex(v => v.type === "app" && v.id === a.id); openDrawer(a.id); }}},
     el("td", {class: "dot"}, el("span", {class: a.reason ? "mark on" : "mark", "aria-hidden": "true"}),
        el("span", {class: "reason"}, a.reason || "")),
     el("td", {class: "company"}, a.company || "—"),
@@ -331,7 +331,14 @@ async function showDescription(id, button) {
   const {text} = await api("GET", `/api/applications/${id}/description`);
   button.replaceWith(el("pre", {class: "jd"}, text || "No description was stored for this job."));
 }
-function closeDrawer() { openId = null; render(); }
+// Opening from closed adds one history entry, so the browser's back button closes the drawer instead of leaving the
+// tracker; Esc and × go back through that entry rather than adding another.
+function openDrawer(id, draw = true) {
+  if (openId === null) history.pushState({drawer: id}, "");
+  openId = id;
+  if (draw) render();
+}
+function closeDrawer() { if (history.state && history.state.drawer !== undefined) history.back(); else { openId = null; render(); } }
 
 async function act(path, body, message) {
   try {
@@ -351,7 +358,7 @@ async function review(jobId, action) {
     const undo = r.message_id ? {message_id: r.message_id, id: r.created ? r.id : undefined} : {job_id: jobId};
     toast(action === "applied" ? "Marked applied" : action === "bad" ? "Marked a bad match" : "Hidden",
           () => api("POST", "/api/review/undo", undo));
-    if (action === "applied" && r.id) { openId = r.id; render(); }
+    if (action === "applied" && r.id) openDrawer(r.id);
   } catch (e) { toast(`Failed: ${e.message}`); }
 }
 function toast(message, undo) {
@@ -377,7 +384,7 @@ function target() { const v = visible[cursor]; return openId !== null ? openId :
 function focusField(id) {
   const t = target();
   if (t === null) return;
-  if (openId !== t) { openId = t; render(); }
+  if (openId !== t) openDrawer(t);
   const node = document.getElementById(id);
   if (node) node.focus();
 }
@@ -386,7 +393,7 @@ document.getElementById("quick").addEventListener("keydown", async e => {
   if (e.key !== "Enter" || !e.target.value.trim()) return;
   try {
     const {id} = await api("POST", "/api/applications", {text: e.target.value});
-    e.target.value = ""; openId = id; await refresh();
+    e.target.value = ""; openDrawer(id, false); await refresh();
     const a = findApp(id);
     if (a && !a.title) document.getElementById("field-title").focus();
     else if (a && !a.company) document.getElementById("field-company").focus();
@@ -397,7 +404,7 @@ document.getElementById("view-list").addEventListener("click", () => { view = "l
 document.getElementById("view-numbers").addEventListener("click", () => { view = "numbers"; render(); });
 document.getElementById("help-open").addEventListener("click", () => { document.getElementById("help").hidden = false; });
 document.getElementById("help").addEventListener("click", () => { document.getElementById("help").hidden = true; });
-window.addEventListener("popstate", closeDrawer);
+window.addEventListener("popstate", () => { if (openId !== null) { openId = null; render(); } });
 
 document.addEventListener("keydown", e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
@@ -416,7 +423,7 @@ document.addEventListener("keydown", e => {
   if (typing || e.metaKey || e.ctrlKey || e.altKey || !state) return;
   const v = visible[cursor];
   if (e.key === "j" || e.key === "k") { cursor += e.key === "j" ? 1 : -1; markCursor(); return; }
-  if (e.key === "Enter" && v && v.type === "app") { openId = v.id; render(); return; }
+  if (e.key === "Enter" && v && v.type === "app") { openDrawer(v.id); return; }
   if (e.key === "?") { document.getElementById("help").hidden = false; return; }
   if (e.key === "v") { view = view === "list" ? "numbers" : "list"; render(); return; }
   if ("abx".includes(e.key) && v && v.type === "review") { review(v.job_id, {a: "applied", b: "bad", x: "hide"}[e.key]); return; }
