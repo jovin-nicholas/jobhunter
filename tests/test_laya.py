@@ -146,7 +146,7 @@ class TestLayaScorer(unittest.TestCase):
     def test_question_checkpoint_maps_decisions_to_scores(self):
         for choice, expected in (("notify", 8), ("log", 6), ("skip", 3)):
             agent = FakeAgent({"decision": {"choice": choice, "answer_confidence": 0.7}})
-            scorer = LayaScorer({"model": checkpoint("question")}, agent_factory=lambda p, d: agent)
+            scorer = LayaScorer({"model": checkpoint("question")}, agent_factory=lambda p, d, agent=agent: agent)
             with self.subTest(choice=choice):
                 self.assertEqual(scorer.score(JOB, RESUME).score, expected)
 
