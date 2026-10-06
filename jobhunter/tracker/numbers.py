@@ -1,5 +1,6 @@
-"""Is this working? Reply rates for the numbers panel: every figure carries how many applications it rests on, and a
-split with fewer than MIN_N is marked `few` so the page greys it out. Pure: application dicts in, numbers out."""
+"""Reply rates for the numbers panel, which answers "is this working?": every figure carries how many applications it
+rests on, and a split with fewer than MIN_N is marked `few` so the page greys it out. Pure: application dicts in,
+numbers out."""
 from __future__ import annotations
 
 from datetime import date
