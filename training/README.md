@@ -30,8 +30,9 @@ checkpoint. Dependencies are in `requirements-train.txt` (which includes `requir
    two pools of jobs you labelled (`pool_old.jsonl` and `pool_jobhunter.jsonl`, for example older and recent labels),
    and `heldout_ids.txt` (job ids kept out of training, separated by spaces or line breaks).
 2. Open the notebook in Colab with a GPU, run the cells and upload the files when asked.
-3. Read the report it prints, download the zip it writes and check it with `shasum -a 256 -c SHA256SUMS`.
-4. Unzip it and point `laya.model` in `jobhunter.yaml` at the folder.
+3. Read the report it prints. `train_questions.ipynb` writes one zip: download it, check it with
+   `shasum -a 256 -c SHA256SUMS` and unzip it. `train_alert.ipynb` saves the checkpoint folder to your Google Drive.
+4. Point `laya.model` in `jobhunter.yaml` at the checkpoint folder.
 
 If Colab disconnects, rerun the setup and data cells; the restore cell picks up the best saved epoch.
 

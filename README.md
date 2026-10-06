@@ -55,11 +55,11 @@ that fires every 15 minutes and let jobhunter decide when a run is due:
 Laya is the default scorer: a local decision model, about 1 second per job on an Apple-silicon GPU (the first job also
 loads it, about 5 s). `laya.model` is a Hugging Face id such as `convaiinnovations/laya`, downloaded on the first run,
 or the folder of a Laya you fine-tuned on your own job decisions. If Laya is not installed or its model is missing,
-jobs fall through to `ollama`, and `check-config` says what is missing.
+jobs fall through to the next scorer (`ollama` in the example settings), and `check-config` says what is missing.
 
-A fine-tuned checkpoint can decide alert, save or skip by itself, with cut-offs you can override in `jobhunter.yaml`
-([docs/settings.md](docs/settings.md#scorers-required)); `check-config` prints the ones in use. To train your own, see
-[training/README.md](training/README.md).
+An alert or questions checkpoint can decide alert, save or skip by itself, with cut-offs you can override in
+`jobhunter.yaml` ([docs/settings.md](docs/settings.md#scorers-required)); `check-config` prints the ones in use. To
+train your own, see [training/README.md](training/README.md).
 
 ## Ollama: choosing a local model
 
