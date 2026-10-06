@@ -20,7 +20,7 @@ MIN_EVERY_MINUTES, MAX_EVERY_MINUTES = 15, 24 * 60
 _EVERY = re.compile(r"^\s*(\d+)\s*(m|min|mins|minutes?|h|hr|hrs|hours?)\s*$", re.I)
 _QUIET = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$")
 LEVELS = ("intern", "entry", "mid", "senior", "staff")
-_TOP_KEYS = {"resumes", "search", "boards", "filters", "scorers", "decisions", "notify", "discovery", "cover_letters", "schedule"}
+_TOP_KEYS = {"resumes", "search", "boards", "filters", "scorers", "decisions", "notify", "discovery", "cover_letters", "schedule", "tracker"}
 # Boards that run when `boards:` is left out: every built-in board that needs no setup of its own, except hydepark (one
 # VC firm's portfolio), which runs only when listed.
 DEFAULT_BOARDS = ("dice", "linkedin", "industry_jobs", "top_companies", "greenhouse", "lever", "ashby", "workday",
@@ -159,6 +159,17 @@ class CoverLetterSettings:
     options: dict = field(default_factory=dict)   # the writer's options for letters, over its scorer options
 
 
+TRACKER_FOLLOW_UP_DAYS = {"applied": 7, "screen": 3, "interview": 3}
+
+
+@dataclass
+class TrackerSettings:
+    ghost_after_days: int = 30            # an application this long in `applied` with no event is suggested as ghosted
+    review_days: int = 14                 # how far back the review queue shows alerts
+    follow_up_days: dict[str, int] = field(default_factory=lambda: dict(TRACKER_FOLLOW_UP_DAYS))
+    fetch_titles: bool = False            # quick add fetches the title of a pasted link not in jobs.db
+
+
 @dataclass
 class Settings:
     path: Path
@@ -172,6 +183,7 @@ class Settings:
     discovery: DiscoverySettings = field(default_factory=DiscoverySettings)
     cover_letters: CoverLetterSettings = field(default_factory=CoverLetterSettings)
     schedule: ScheduleSettings = field(default_factory=ScheduleSettings)
+    tracker: TrackerSettings = field(default_factory=TrackerSettings)
 
     @property
     def base_dir(self) -> Path:
@@ -258,11 +270,12 @@ def load_settings(path: str | Path, env: Mapping[str, str] | None = None) -> Set
     discovery = _discovery(c, raw.get("discovery"))
     cover_letters = _cover_letters(c, raw.get("cover_letters"), scorers)
     schedule = _schedule(c, raw.get("schedule"))
+    tracker = _tracker(c, raw.get("tracker"))
     _check_env(c, scorers, notify, discovery, env)
     if c.problems:
         raise SettingsError([f"{path.name}: {p}" for p in c.problems])
     return Settings(path, resumes, search, boards, filters, scorers, decisions, notify, discovery, cover_letters,
-                    schedule)
+                    schedule, tracker)
 
 
 def _resumes(c: _Checker, raw: Any, base: Path) -> ResumeSettings:
@@ -611,6 +624,24 @@ def _schedule(c: _Checker, raw: Any) -> ScheduleSettings:
             out.timezone = str(raw["timezone"])
         except (ZoneInfoNotFoundError, ValueError):
             c.add("schedule.timezone", f"unknown time zone {raw['timezone']!r} (e.g. America/New_York)")
+    return out
+
+
+def _tracker(c: _Checker, raw: Any) -> TrackerSettings:
+    raw = c.mapping("tracker", raw, {"ghost_after_days", "review_days", "follow_up_days", "fetch_titles"})
+    out = TrackerSettings()
+    for key in ("ghost_after_days", "review_days"):
+        if raw.get(key) is not None:
+            value = c.integer(f"tracker.{key}", raw[key], minimum=1, maximum=365)
+            if value is not None:
+                setattr(out, key, value)
+    days = c.mapping("tracker.follow_up_days", raw.get("follow_up_days"), set(TRACKER_FOLLOW_UP_DAYS))
+    for stage, value in days.items():
+        if stage in TRACKER_FOLLOW_UP_DAYS:
+            n = c.integer(f"tracker.follow_up_days.{stage}", value, minimum=1, maximum=90)
+            if n is not None:
+                out.follow_up_days[stage] = n
+    out.fetch_titles = c.boolean("tracker.fetch_titles", raw.get("fetch_titles"), False)
     return out
 
 

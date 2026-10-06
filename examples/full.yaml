@@ -114,6 +114,12 @@ schedule:                               # used by scheduler.py and `run --schedu
   quiet_days: [sat, sun]                # no runs on these days
   timezone: America/New_York            # for quiet hours and days; default: the computer's
 
+# tracker:                              # jobhunter tracker (all optional)
+#   ghost_after_days: 30                # suggest "ghosted" after this many quiet days in applied
+#   review_days: 14                     # alerts this recent appear in the review queue
+#   follow_up_days: {applied: 7, screen: 3, interview: 3}
+#   fetch_titles: false                 # true: quick add fetches a pasted link's title (makes a web request)
+
 # notify:
 #   slack: {webhook_env: SLACK_WEBHOOK_URL}
 #   email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD,  # to_env: NOTIFY_EMAIL (optional)

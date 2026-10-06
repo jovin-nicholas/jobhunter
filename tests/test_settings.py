@@ -288,3 +288,34 @@ class TestVcDiscoverySettings(unittest.TestCase):
             with self.subTest(discovery=discovery):
                 found = self.problems(discovery)
                 self.assertTrue(any(problem in p for p in found), found)
+
+
+class TestTrackerSettings(unittest.TestCase):
+    def load(self, extra=""):
+        path = write_project(Path(tempfile.mkdtemp()).resolve(), VALID.rstrip("\n") + "\n" + extra, RESUMES)
+        return load_settings(path, env={"SLACK_WEBHOOK_URL": "x"})
+
+    def test_left_out_gives_the_defaults(self):
+        t = self.load().tracker
+        self.assertEqual((t.ghost_after_days, t.review_days, t.fetch_titles), (30, 14, False))
+        self.assertEqual(t.follow_up_days, {"applied": 7, "screen": 3, "interview": 3})
+
+    def test_values_override_the_defaults(self):
+        t = self.load("tracker:\n  ghost_after_days: 21\n  review_days: 7\n  fetch_titles: true\n"
+                      "  follow_up_days: {applied: 10}\n").tracker
+        self.assertEqual((t.ghost_after_days, t.review_days, t.fetch_titles), (21, 7, True))
+        self.assertEqual(t.follow_up_days, {"applied": 10, "screen": 3, "interview": 3})
+
+    def test_bad_values_are_settings_errors(self):
+        for extra, key in (("tracker: {review_days: 0}\n", "tracker.review_days"),
+                           ("tracker: {fetch_titles: yes please}\n", "tracker.fetch_titles"),
+                           ("tracker: {follow_up_days: {offer: 3}}\n", "tracker.follow_up_days.offer"),
+                           ("tracker: {colour: green}\n", "tracker.colour")):
+            with self.subTest(extra=extra), self.assertRaises(SettingsError) as caught:
+                self.load(extra)
+            self.assertTrue(any(key in p for p in caught.exception.problems), caught.exception.problems)
+
+    def test_the_default_does_not_leak_between_settings(self):
+        a, b = self.load().tracker, self.load().tracker
+        a.follow_up_days["applied"] = 99
+        self.assertEqual(b.follow_up_days["applied"], 7)

@@ -159,6 +159,17 @@ Used by `scheduler.py` and `run --scheduled` (cron). A plain `run` ignores it.
 | `quiet_days` | none | `[sat, sun]`: no runs on these days |
 | `timezone` | the computer's | For quiet hours and days, e.g. `America/New_York` |
 
+## tracker
+
+Settings for `jobhunter tracker`, the application tracker. All optional.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ghost_after_days` | `30` | An application this many days in `applied` with no event is suggested as ghosted (never set by itself) |
+| `review_days` | `14` | The review queue shows notified jobs from this many days back |
+| `follow_up_days` | `{applied: 7, screen: 3, interview: 3}` | Days until the follow-up date set when an application moves to that stage |
+| `fetch_titles` | `false` | Quick add fetches the title and company of a pasted link that is not in `jobs.db` (only public http(s) addresses) |
+
 ## notify
 
 Off unless set. A failed channel is logged and never stops a run. When no channel delivers an alert, the job is
