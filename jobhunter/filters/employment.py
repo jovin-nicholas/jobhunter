@@ -1,9 +1,9 @@
 """Skips contract and hourly-pay jobs. No board reports employment type, so the title and description are read for
 wording that signals one: a title word like "contract" or "temp", an hourly rate stated in dollars, a fixed-term
 phrase such as "6-month contract", or an explicit "employment type: contract" label. A skip is final, so each rule
-asks for wording that names the arrangement: a bare "1099" (as in "Form 1099 processing"), a number per hour without
-a currency in the description ("10,000/hr transactions") or "smart contract" never skips. In the title a number per
-hour is pay ("Data Engineer 65/hr W2")."""
+asks for wording that names the arrangement: a bare "1099" (as in "Form 1099 processing"), a product that handles
+contractors ("independent contractor onboarding", "help freelancers work as a contractor"), a number per hour without
+a currency in the description ("10,000/hr transactions") or "smart contract" never skips. In the title a number per hour is pay ("Data Engineer 65/hr W2")."""
 from __future__ import annotations
 
 import re
@@ -24,10 +24,10 @@ _TEMP_TITLE_RE = re.compile(r"\btemp\b(?=\s+(?:role|position|assignment|job|work
                             r"|[(\[]\s*temp\s*[)\]]|[-\u2013,|]\s*temp\s*$", re.I)
 # Phrases safe to match anywhere in the title or description (unlike the bare word "contract", which also turns up
 # in "manage vendor contracts" or "smart contracts"). "1099" counts only in phrasing about the arrangement, never bare
-# ("Form 1099 processing"); "contractor" only as a role ("as a contractor"), never "contractors we work with".
+# ("Form 1099 processing"); "contractor" only as a role ("contractor role"), never "contractors we work with".
 _CONTRACT_PHRASE_TERMS = ("contract role", "contract position", "contract opportunity", "contract assignment",
-                          "contractor role", "contractor position", "as a contractor", "independent contractor",
-                          "1099 contract", "on 1099", "1099 only", "1099 or c2c", "c2c or 1099",
+                          "contractor role", "contractor position",
+                          "1099 contract", "1099 only", "1099 or c2c", "c2c or 1099",
                           "c2c", "corp to corp", "w2 contract", "w2 only", "only w2")
 # Blockchain work, not an employment contract: masked before the bare title word "contract" is looked for.
 _SMART_CONTRACT_TERMS = ("smart contracts", "smart contract")
@@ -46,7 +46,24 @@ _PROGRAM_WORDS = {"program", "onboarding", "training", "rotation", "fellowship",
                   "internship"}
 _PROGRAM_AFTER = 4
 _SENTENCE_END = re.compile(r"[.!?;\n](?:\s|$)|[\n\u2022]")
-_TYPE_RE = re.compile(r"\b(?:employment|job|position)\s*type\s*[:\-]\s*(?:contract|temporary)\b", re.I)
+_TYPE_RE = re.compile(r"\b(?:employment|job|position)\s*type\s*[:\-]\s*"
+                      r"(?:contract|temporary|(?:independent\s+)?contractor|1099)\b", re.I)
+# "Paid on 1099", "This role is on a 1099 basis": the job is paid on 1099. Not "reporting on 1099 forms" or "working
+# on 1099-NEC filings", where the product handles the form.
+_ON_1099_RE = re.compile(r"\b(?:paid|be|is|are|hired|employed|engaged|role|position)\s+on\s+(?:a\s+)?1099\b"
+                         r"(?![\s-]*(?:nec|misc|forms?|filings?|tax|reporting))", re.I)
+# "You'll work as a contractor", "Hired as an independent contractor", "Work as a contractor with our team" (a
+# sentence opening with it): the candidate is the contractor. Not "help freelancers work as a contractor".
+_AS_CONTRACTOR_RE = re.compile(
+    r"(?:[.!?:;\n]\s*|\b(?:you|you['\u2019]ll|you['\u2019]re|will|would|be|is|are|hired|engaged|classified|retained|"
+    r"onboarded|paid|contracted)\s+)(?:(?:work|working|serve|serving|join|joining|start|starting|be)\s+)?"
+    r"as\s+an?\s+(?:independent\s+|1099\s+)?contractor\b", re.I)
+# "An independent contractor engagement", "on an independent contractor basis"; not "independent contractor onboarding".
+_INDEPENDENT_RE = re.compile(r"\bindependent[\s-]+contractor\s+(?:engagement|role|position|basis|opportunity|"
+                             r"arrangement|assignment)\b", re.I)
+# Checked after the phrase terms, each with the reason it gives.
+_ARRANGEMENT_REGEXES = ((_ON_1099_RE, "on 1099"), (_AS_CONTRACTOR_RE, "as a contractor"),
+                        (_INDEPENDENT_RE, "independent contractor"))
 _CONTRACT_REGEXES = (_MONTH_CONTRACT_RE, _DURATION_RE, _TYPE_RE)
 
 
@@ -106,7 +123,7 @@ class EmploymentFilter:
     def check(self, job: Job) -> FilterResult:
         title = word_text(job.title)
         text = word_text(f"{job.title} {job.description}")
-        raw_text = f"{job.title} {job.description}".lower()
+        raw_text = f"{job.title}\n{job.description}".lower()     # the line break: the description opens a sentence
 
         if "contract" in self.s.exclude:
             match = self._contract_match(title, text, raw_text, (job.title or "").strip())
@@ -142,6 +159,9 @@ class EmploymentFilter:
         for term in _CONTRACT_PHRASE_TERMS:
             if has_term(text, term):
                 return term
+        for regex, reason in _ARRANGEMENT_REGEXES:
+            if regex.search(raw_text):
+                return reason
         for regex in _CONTRACT_REGEXES:
             for m in regex.finditer(raw_text):
                 if not _a_program_length(raw_text, m):

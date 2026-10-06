@@ -283,5 +283,37 @@ class TestBuildFiltersOrder(unittest.TestCase):
         self.assertEqual([x.name for x in filters], ["keywords", "employment"])
 
 
+class TestContractWordsAboutTheProduct(unittest.TestCase):
+    """ "on 1099", "independent contractor" and "as a contractor" skipped jobs whose product handles 1099s or
+    contractors. They now need wording that puts the candidate in the arrangement."""
+
+    def test_product_wording_is_kept(self):
+        for description in ("Build tools for reporting on 1099 forms.",
+                            "You will be working on 1099-NEC filings for clients.",
+                            "Our platform supports independent contractor onboarding.",
+                            "We help freelancers work as a contractor or employee.",
+                            "Payroll for teams that pay independent contractors and employees."):
+            with self.subTest(description=description):
+                self.assertTrue(f().check(job(description=description)).keep, description)
+
+    def test_the_candidates_arrangement_still_skips(self):
+        cases = {
+            "You will be paid on a 1099 basis.": "on 1099",
+            "This role is on 1099.": "on 1099",
+            "You will be hired as an independent contractor.": "as a contractor",
+            "You'll work as a contractor for six months.": "as a contractor",
+            "Engaged as a contractor through our agency.": "as a contractor",
+            "This is an independent contractor position.": "contractor position",
+            "Independent contractor role, fully remote.": "contractor role",
+            "Hired on an independent contractor basis.": "independent contractor",
+            "Employment Type: Independent Contractor": "employment type: independent contractor",
+        }
+        for description, snippet in cases.items():
+            with self.subTest(description=description):
+                result = f().check(job(description=description))
+                self.assertFalse(result.keep, description)
+                self.assertEqual(result.reason, f"contract: {snippet}")
+
+
 if __name__ == "__main__":
     unittest.main()
