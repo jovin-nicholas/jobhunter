@@ -16,7 +16,7 @@ def last_activity(app: dict) -> date:
     return max([date.fromisoformat(e["at"]) for e in app["events"]] or [date.fromisoformat(app["applied_at"])])
 
 
-def _follow_up_due(app: dict, today: date, settings: TrackerSettings) -> str | None:
+def follow_up_due(app: dict, today: date, settings: TrackerSettings) -> str | None:
     """The follow-up date: the one set, else for an application still in `applied` with no follow-up event at all
     (added by review, quick add, an email or the import) the applied date plus the `applied` follow-up days. A derived
     date more than ghost_after_days past is dropped, so old imported rows become ghost suggestions instead."""
@@ -46,7 +46,7 @@ def attention(app: dict, today: date, settings: TrackerSettings) -> tuple[int, s
     if upcoming:
         at, value = upcoming[0]
         return 1, value, at
-    follow_up = _follow_up_due(app, today, settings)
+    follow_up = follow_up_due(app, today, settings)
     if follow_up and date.fromisoformat(follow_up) <= today:
         return 2, "follow up", follow_up
     if app["stage"] == "applied" and (today - last_activity(app)).days >= settings.ghost_after_days:

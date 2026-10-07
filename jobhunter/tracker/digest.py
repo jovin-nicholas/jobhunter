@@ -1,0 +1,110 @@
+"""The follow-up email: on a day a follow-up, screen or interview falls due, one email listing what is due today,
+overdue follow-ups and calls this week, with each job's link, people and notes. No buttons: only the job links."""
+from __future__ import annotations
+
+import html as html_lib
+from datetime import date, timedelta
+
+from jobhunter.settings import TrackerSettings
+from jobhunter.tracker import CLOSED_STAGES
+from jobhunter.tracker.records import safe_url
+from jobhunter.tracker.state import follow_up_due, last_activity
+
+CALL_DAYS = 7                     # "calls this week": screens and interviews in the next 7 days after today
+CALLS = ("screen", "interview")
+GROUPS = (("today", "Due today"), ("overdue", "Overdue"), ("this_week", "Calls this week"))
+
+
+def _scheduled_calls(app: dict) -> list[tuple[str, str]]:
+    """(date, stage) of each screen or interview entered ahead of its date; one logged on its own day has happened."""
+    return [(e["at"], e["value"]) for e in app["events"] if e["kind"] == "stage" and e["value"] in CALLS
+            and e["at"] > (e.get("created_at") or "")[:10]]
+
+
+def _on(day: date, today: date) -> str:
+    return "tomorrow" if day == today + timedelta(days=1) else f"{day:%a} {day:%b} {day.day}"
+
+
+def due_items(apps: list[dict], settings: TrackerSettings, today: date) -> dict:
+    items: dict = {"today": [], "overdue": [], "this_week": [], "quiet": 0, "quiet_days": settings.ghost_after_days}
+    iso, week_end = today.isoformat(), today + timedelta(days=CALL_DAYS)
+
+    def entry(app: dict, reason: str, when: str, sort: str) -> dict:
+        return {"id": app["id"], "company": app.get("company") or "", "title": app.get("title") or "",
+                "url": safe_url(app.get("url") or ""), "stage": app["stage"], "people": app.get("people") or "",
+                "notes": app.get("notes") or "", "reason": reason, "when": when, "sort": sort}
+    for app in apps:
+        if app["stage"] in CLOSED_STAGES:
+            continue
+        follow_up = follow_up_due(app, today, settings)
+        if follow_up == iso:
+            items["today"].append(entry(app, "follow up", "today", iso))
+        elif follow_up and follow_up < iso:
+            late = (today - date.fromisoformat(follow_up)).days
+            items["overdue"].append(entry(app, "follow up", f"{late} day{'s' if late != 1 else ''} late", follow_up))
+        for at, stage in _scheduled_calls(app):
+            day = date.fromisoformat(at)
+            if day == today:
+                items["today"].append(entry(app, stage, "today", at))
+            elif today < day <= week_end:
+                items["this_week"].append(entry(app, stage, _on(day, today), at))
+        if app["stage"] == "applied" and not follow_up and (today - last_activity(app)).days >= settings.ghost_after_days:
+            items["quiet"] += 1
+    for key in ("today", "overdue", "this_week"):
+        items[key].sort(key=lambda e: (e["sort"], e["company"].lower(), e["id"]))
+    return items
+
+
+def _subject(items: dict) -> str:
+    companies = ", ".join(dict.fromkeys(e["company"] or "—" for e in items["today"]))
+    parts = [f"Due today: {companies}"]
+    if items["overdue"]:
+        parts.append(f"{len(items['overdue'])} overdue")
+    if items["this_week"]:
+        n = len(items["this_week"])
+        parts.append(f"{n} call{'s' if n != 1 else ''} this week")
+    return "[jobhunter] " + " · ".join(parts)
+
+
+def _plain_entry(e: dict) -> str:
+    lines = [f"- {e['company'] or '—'}: {e['title'] or '—'} ({e['stage']}), {e['reason']} {e['when']}"]
+    if e["url"]:
+        lines.append(f"  {e['url']}")
+    if e["people"]:
+        lines.append(f"  People: {e['people']}")
+    if e["notes"]:
+        lines.append("  Notes: " + e["notes"].replace("\n", "\n         "))
+    return "\n".join(lines)
+
+
+def _html_entry(e: dict) -> str:
+    esc = lambda s: html_lib.escape(str(s or ""), quote=True)    # noqa: E731
+    title = f'<a href="{esc(e["url"])}">{esc(e["title"] or "—")}</a>' if e["url"] else esc(e["title"] or "—")
+    extra = ""
+    if e["people"]:
+        extra += f'<div style="color:#555">People: {esc(e["people"])}</div>'
+    if e["notes"]:
+        extra += f'<div style="color:#555">Notes: {esc(e["notes"]).replace(chr(10), "<br>")}</div>'
+    return (f'<li style="margin:0 0 10px"><strong>{esc(e["company"] or "—")}</strong>: {title} '
+            f'<span style="color:#555">({esc(e["stage"])}, {esc(e["reason"])} {esc(e["when"])})</span>{extra}</li>')
+
+
+def compose(items: dict, today: date) -> tuple[str, str, str] | None:
+    """(subject, plain text, HTML), or None when nothing falls due today: overdue items and calls this week alone
+    send nothing, since an overdue follow-up was already in the email on its own day."""
+    if not items["today"]:
+        return None
+    plain, body = [], []
+    for key, heading in GROUPS:
+        if items[key]:
+            plain.append(heading + "\n" + "\n".join(_plain_entry(e) for e in items[key]))
+            body.append(f'<h3 style="font-size:15px;margin:18px 0 6px">{heading}</h3><ul style="padding-left:18px">'
+                        + "".join(_html_entry(e) for e in items[key]) + "</ul>")
+    footer = "Open the tracker with `python -m jobhunter tracker`."
+    if items["quiet"]:
+        footer = (f"Also {items['quiet']} application{'s' if items['quiet'] != 1 else ''} "
+                  f"quiet for {items['quiet_days']}+ days. " + footer)
+    text = "\n\n".join(plain) + "\n\n" + footer
+    page = ('<div style="font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1c1b19">' + "".join(body)
+            + f'<p style="color:#555;margin-top:18px">{html_lib.escape(footer)}</p></div>')
+    return _subject(items), text, page
