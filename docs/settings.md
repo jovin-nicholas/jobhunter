@@ -170,7 +170,7 @@ Settings for `jobhunter tracker`, the application tracker. All optional.
 | `follow_up_days` | `{applied: 7, screen: 3, interview: 3}` | Days until the follow-up date set when an application moves to that stage |
 | `fetch_titles` | `false` | Quick add fetches the title and company of a pasted link that is not in `jobs.db` (only public http(s) addresses) |
 | `follow_up_email` | `false` | At `digest_at` once a follow-up, screen or interview has fallen due since the last digest day (each item once), email what is due today, overdue follow-ups and calls this week (with people and notes) to the alerts' recipient plus `+digest_tag`; needs `notify.email` |
-| `digest_at` | `"08:00"` | Local time (`schedule.timezone`) from which that day's email is sent, by the first run at or after it |
+| `digest_at` | `"08:00"` | Local time from which that day's email is sent, by the first run at or after it: a run must happen at or after this time, so with `schedule.every: 24h` start the scheduler (or set the cron time) after it. "Today" for the email uses `schedule.timezone`, while the tracker page uses the computer's zone; leave `timezone` unset or set it to the computer's zone to keep them in step |
 | `digest_tag` | `followup` | Plus tag on the recipient (`you+followup@gmail.com`), for a Gmail filter; must differ from `alert_tag` and `feedback_tag` |
 
 ## notify
