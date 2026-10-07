@@ -198,6 +198,9 @@ function matches(a) {
   const q = query.toLowerCase();
   return [a.company, a.title, a.notes, a.people].some(v => (v || "").toLowerCase().includes(q));
 }
+function matchesReview(r) {
+  return !query || [r.company, r.title].some(v => (v || "").toLowerCase().includes(query.toLowerCase()));
+}
 
 function render() {
   if (!state) return;
@@ -268,7 +271,7 @@ function group(title, apps, opts = {}) {
 function renderList() {
   const g = state.groups;
   const needs = g.needs.filter(matches), waiting = g.waiting.filter(matches), closed = g.closed.filter(matches);
-  const review = query || stageFilter ? [] : state.review;
+  const review = stageFilter ? [] : state.review.filter(matchesReview);    // a stage filter is about applications
   visible = [...needs, ...waiting, ...(showClosed ? closed : [])].map(a => ({type: "app", id: a.id}))
     .concat(review.map(r => ({type: "review", job_id: r.job_id})));
   const nothing = !allApps().length;
@@ -279,16 +282,17 @@ function renderList() {
     ...group("waiting", waiting),
     ...(closed.length ? group("closed", closed, {collapsed: !showClosed, toggle: closedToggle}) : []),
   ];
-  if (!query && !stageFilter) {
+  if (!stageFilter && (review.length || !query)) {
     parts.push(el("h2", {}, "to review · ", el("span", {class: "count"}, review.length),
-                  ` alerts from the last ${state.settings.review_days} days`));
+                  query ? " matching alerts" : ` alerts from the last ${state.settings.review_days} days`));
     parts.push(review.length
       ? el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "age"], ["fit", "fit"], ["", "acts"]),
            el("tbody", {}, review.map(reviewRow)))
       : el("p", {class: "empty"}, "No recent alerts to review."));
-    if (nothing) parts.unshift(el("p", {class: "empty"}, "Mark the alerts you applied to with “applied” below, or add one "
-                                  + "with the Add box above."));
+    if (nothing && !query) parts.unshift(el("p", {class: "empty"}, "Mark the alerts you applied to with “applied” below, "
+                                            + "or add one with the Add box above."));
   }
+  if (query && !visible.length) parts.push(el("p", {class: "empty"}, `No matches for “${query}”.`));
   return parts;
 }
 function renderNumbers() {

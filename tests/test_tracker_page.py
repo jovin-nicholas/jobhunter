@@ -80,6 +80,10 @@ class TestPage(unittest.TestCase):
     def test_a_missing_fit_says_why(self):
         self.assertIn("no fit score", self.text)
 
+    def test_search_also_filters_the_review_queue(self):
+        self.assertIn("state.review.filter(matchesReview)", self.text)
+        self.assertIn("No matches for", self.text)
+
     def test_the_drawer_can_delete_an_application(self):
         self.assertIn("/delete`", self.text)
         self.assertIn("Delete application", self.text)
