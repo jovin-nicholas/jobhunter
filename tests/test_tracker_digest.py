@@ -14,6 +14,7 @@ from jobhunter.settings import NotifySettings, ScheduleSettings, TrackerSettings
 from jobhunter.store import Store
 from jobhunter.tracker.digest import STATE_FILE, compose, digest_address, due_items, send_digest
 from jobhunter.tracker.records import Applications
+from jobhunter.tracker.state import attention
 
 TODAY = date(2026, 10, 7)
 
@@ -100,6 +101,31 @@ class TestDueItems(unittest.TestCase):
         since = due_items(apps, TrackerSettings(), TODAY, since=date(2026, 10, 3))
         self.assertEqual(sorted(e["id"] for e in since["new_since"]), [1, 2])       # 3 was due before; 4 not yet
         self.assertEqual([e["id"] for e in due_items(apps, TrackerSettings(), TODAY)["new_since"]], [1])  # today only
+
+    def test_quiet_counts_an_old_application_whose_follow_up_is_not_due_yet(self):
+        items = due_items([app(1, applied="2026-08-01", follow_up="2026-10-20")], TrackerSettings(), TODAY)
+        self.assertEqual(items["quiet"], 1)                       # the page shows it as "ghost?"
+
+    def test_the_email_and_the_page_agree(self):
+        s = TrackerSettings()
+        apps = [app(1, follow_up="2026-10-07"), app(2, follow_up="2026-10-03"), app(3, follow_up="2026-10-09"),
+                app(4, applied="2026-09-30"), app(5, applied="2026-09-20"), app(6, applied="2026-08-01"),
+                app(7, applied="2026-08-01", follow_up="2026-10-20"),
+                app(8, applied="2026-08-01", follow_up="2026-10-01"),
+                app(9, "interview", events=[("interview", "2026-10-07", "2026-10-02")]),
+                app(10, "screen", events=[("screen", "2026-10-07", "2026-10-07")]),
+                app(11, "offer", events=[("offer", "2026-10-06", "2026-10-06")]),
+                app(12, "rejected", follow_up="2026-10-05", events=[("rejected", "2026-10-06", "2026-10-06")])]
+        items = due_items(apps, s, TODAY)
+        page = {a["id"]: (attention(a, TODAY, s) or (None, None))[1] for a in apps}
+        listed = {e["id"]: e["reason"] for e in items["today"] + items["overdue"]}
+        self.assertEqual(listed, {1: "follow up", 2: "follow up", 4: "follow up", 5: "follow up", 8: "follow up",
+                                  9: "interview"})
+        for i, reason in listed.items():
+            self.assertEqual(page[i], reason, i)
+        self.assertEqual({i for i, r in page.items() if r == "follow up"},
+                         {i for i, r in listed.items() if r == "follow up"})
+        self.assertEqual(items["quiet"], sum(r == "ghost?" for r in page.values()))
 
     def test_quiet_days_reflects_settings(self):
         items = due_items([app(1, applied="2026-09-01")], TrackerSettings(ghost_after_days=21), TODAY)
@@ -245,7 +271,7 @@ class TestSendDigest(unittest.TestCase):
         self.assertIn("sent", self.run_on(FakeSettings(self.folder), "2026-10-12", "08:00"))
         self.assertEqual(self.sent, ["[jobhunter] Due since Sat Oct 10: Globex · 2 overdue"])
         self.assertIn("- Globex: Engineer (applied), follow up 2 days late", self.plain[0])
-        self.assertIn("- Acme: Engineer (applied), follow up 5 days late", self.plain[0])   # listed, but not the trigger
+        self.assertIn("- Acme: Engineer (applied), follow up 5 days late", self.plain[0])   # listed, not the trigger
 
     def test_two_failures_on_the_due_day_then_the_next_day_sends(self):
         s = FakeSettings(self.folder)

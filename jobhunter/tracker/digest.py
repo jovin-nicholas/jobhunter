@@ -56,7 +56,9 @@ def due_items(apps: list[dict], settings: TrackerSettings, today: date, since: d
                 items["today"].append(entry(app, stage, "today", at))
             elif today < day <= week_end:
                 items["this_week"].append(entry(app, stage, _on(day, today), at))
-        if app["stage"] == "applied" and not follow_up and (today - last_activity(app)).days >= settings.ghost_after_days:
+        # Counted as the page's "ghost?": quiet long enough, and no follow-up due yet.
+        if (app["stage"] == "applied" and not (follow_up and follow_up <= iso)
+                and (today - last_activity(app)).days >= settings.ghost_after_days):
             items["quiet"] += 1
     for key in ("today", "overdue", "this_week"):
         items[key].sort(key=lambda e: (e["sort"], e["company"].lower(), e["id"]))
@@ -168,7 +170,8 @@ def _since(last: str, failures: int) -> date | None:
 
 def send_digest(settings: Any, store: Any, now: datetime, send: Callable[[str, str, str], bool]) -> str | None:
     """Send today's follow-up email if it is on, it is digest_at or later locally, today's has not gone yet and
-    something fell due since the last digest day. Returns a line for the run log, or None when there is nothing to say."""
+    something fell due since the last digest day. Returns a line for the run log, or None when there is nothing to
+    say."""
     tracker = settings.tracker
     if not tracker.follow_up_email or not settings.notify.email:
         return None
