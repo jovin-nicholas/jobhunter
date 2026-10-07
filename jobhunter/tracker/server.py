@@ -148,7 +148,8 @@ class _Handler(BaseHTTPRequestHandler):
         if method == "GET" and m and m.group(2) == "/description":
             return self._json(200, {"text": apps.description(int(m.group(1)))})
         if method == "POST" and path == "/api/applications":
-            return self._json(200, {"id": self._quick_add(body, today)})
+            app_id, existing = self._quick_add(body, today)
+            return self._json(200, {"id": app_id, "existing": existing})
         if method == "POST" and m and m.group(2) is None:
             apps.update(int(m.group(1)), **body)
             return self._json(200, {"ok": True})
@@ -174,25 +175,29 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         return self._json(404, {"error": "not found"})
 
-    def _quick_add(self, body: dict, today: date) -> int:
+    def _quick_add(self, body: dict, today: date) -> tuple[int, bool]:
+        """(application id, whether it was already tracked): a repeat opens the open application instead of adding."""
         apps, settings = self.server.apps, self.server.settings
         if len(str(body.get("text") or "")) > 2000:
             raise ValueError("that is too long for a job link or Company — Title")
         url, company, title = parse_quick_add(str(body.get("text") or ""))
         if not (url or company):
             raise ValueError("paste a job link, or type Company — Title")
+        duplicate = apps.open_duplicate(url=url, company=company, title=title)
+        if duplicate:
+            return duplicate, True
         if url:
             job_id = apps.find_job(url)
             if job_id:
                 existing = apps.open_for_job(job_id)
                 if existing:
-                    return existing                   # already tracked: open it rather than add a second
+                    return existing, True             # already tracked under another link to the same job
                 app_id = apps.add_from_job(job_id, today.isoformat())
                 apps.record_verdict(job_id, "applied")
-                return app_id
+                return app_id, False
             if settings.fetch_titles and self.server.http is not None:
                 title, company = title_and_company(self.server.http, url)
-        return apps.add(title=title, company=company, url=url, applied_at=today.isoformat())
+        return apps.add(title=title, company=company, url=url, applied_at=today.isoformat()), False
 
     def _set_stage(self, app_id: int, body: dict, today: date) -> list[int]:
         apps, stage = self.server.apps, body.get("stage")

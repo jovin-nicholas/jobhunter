@@ -431,8 +431,9 @@ async function addApplication() {
   const input = document.getElementById("quick");
   if (!input.value.trim()) { input.focus(); return; }
   try {
-    const {id} = await api("POST", "/api/applications", {text: input.value});
+    const {id, existing} = await api("POST", "/api/applications", {text: input.value});
     input.value = ""; openDrawer(id, false); await refresh();
+    if (existing) toast("Already tracked: opened the existing application");
     const a = findApp(id);
     if (a && !a.title) document.getElementById("field-title").focus();
     else if (a && !a.company) document.getElementById("field-company").focus();

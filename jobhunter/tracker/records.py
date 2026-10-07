@@ -240,6 +240,22 @@ class Applications:
                                (job_id, *OPEN_STAGES)).fetchone()
         return row[0] if row else None
 
+    def open_duplicate(self, url: str = "", company: str = "", title: str = "") -> int | None:
+        """An open application that this one would repeat: the same link (ignoring tracking noise), or, without a link,
+        the same company and title (ignoring case). A closed one is not a duplicate: applying again is allowed."""
+        key = url_key(url) if url else ""
+        company, title = " ".join(company.lower().split()), " ".join(title.lower().split())
+        with self.store.connect() as conn:
+            rows = conn.execute(f"SELECT id, url, company, title FROM applications WHERE stage IN "
+                                f"({','.join('?' * len(OPEN_STAGES))}) ORDER BY id DESC", OPEN_STAGES).fetchall()
+        for app_id, app_url, app_company, app_title in rows:
+            if key and app_url and url_key(app_url) == key:
+                return app_id
+            if not key and company and (" ".join((app_company or "").lower().split()),
+                                        " ".join((app_title or "").lower().split())) == (company, title):
+                return app_id
+        return None
+
     def find_job(self, url: str) -> str | None:
         """The stored job a pasted link points at: the same URL, else the same one without tracking noise."""
         url, key = (url or "").strip(), url_key(url)

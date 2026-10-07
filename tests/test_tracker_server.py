@@ -247,5 +247,37 @@ class TestDelete(ServerTestCase):
         self.assertEqual(self.call("POST", f"/api/applications/{app_id}/delete", {}, token=None)[0], 403)
 
 
+
+class TestDuplicates(ServerTestCase):
+    def add(self, text):
+        status, _, body = self.call("POST", "/api/applications", {"text": text})
+        self.assertEqual(status, 200)
+        return json.loads(body)
+
+    def test_the_same_outside_link_twice_opens_the_first(self):
+        first = self.add("https://careers.example.org/42")
+        again = self.add("https://CAREERS.example.org/42/?utm_source=x#apply")
+        self.assertEqual((again["id"], again["existing"], first["existing"]), (first["id"], True, False))
+        self.assertEqual(len(self.apps.all()), 1)
+
+    def test_the_same_company_and_title_twice_opens_the_first(self):
+        first = self.add("Globex — Platform Engineer")
+        again = self.add("globex - platform engineer")
+        self.assertEqual((again["id"], again["existing"]), (first["id"], True))
+        self.assertNotEqual(self.add("Globex — Data Engineer")["id"], first["id"])
+
+    def test_a_stored_job_already_tracked_says_so(self):
+        first = self.add("https://jobs.example.com/acme/1?gh_jid=1")
+        self.assertEqual(self.add("https://jobs.example.com/acme/1")["existing"], True)
+        self.assertFalse(first["existing"])
+
+    def test_a_closed_application_can_be_applied_to_again(self):
+        first = self.add("https://careers.example.org/42")
+        self.call("POST", f"/api/applications/{first['id']}/stage", {"stage": "rejected"})
+        again = self.add("https://careers.example.org/42")
+        self.assertEqual(again["existing"], False)
+        self.assertNotEqual(again["id"], first["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

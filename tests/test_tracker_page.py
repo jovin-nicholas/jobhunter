@@ -84,6 +84,9 @@ class TestPage(unittest.TestCase):
         self.assertIn("state.review.filter(matchesReview)", self.text)
         self.assertIn("No matches for", self.text)
 
+    def test_a_duplicate_add_says_already_tracked(self):
+        self.assertIn("Already tracked", self.text)
+
     def test_the_drawer_can_delete_an_application(self):
         self.assertIn("/delete`", self.text)
         self.assertIn("Delete application", self.text)
