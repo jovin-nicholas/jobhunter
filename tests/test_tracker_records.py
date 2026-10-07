@@ -136,7 +136,7 @@ class TestApplications(unittest.TestCase):
         self.assertEqual((app["job_id"], app["title"], app["company"], app["url"], app["board"], app["resume_id"],
                           app["fit"], app["fit_score"]),
                          ("dice_1", "Backend Engineer", "Acme", "https://jobs.example.com/acme/1", "dice",
-                          "backend.txt", "fit 7.40/10", 7.4))
+                          "backend.txt", "7.40", 7.4))
         self.assertEqual(self.apps.description(app["id"]), "Java services")
         self.assertIsNone(self.apps.add_from_job("nope_9", "2026-10-01"))
 
@@ -265,3 +265,23 @@ class TestApplyVerdicts(unittest.TestCase):
         self.verdict("dice_1", "applied", "2026-10-05")
         self.assertEqual(self.apps.apply_verdicts(), 0)
         self.assertEqual([a["id"] for a in self.apps.all()], [app_id])
+
+
+class TestFitIsOneFormat(unittest.TestCase):
+    """Scorers label fit differently ("fit 6.50/10", "6.8522/10", "8/10"); the tracker shows one two-decimal number."""
+
+    def test_every_score_shows_with_two_decimals(self):
+        store = new_store()
+        for i, (score, label) in enumerate(((8, ""), (6.8522, ""), (6.5019, "fit 6.50/10"), (None, ""))):
+            store.save(Job(f"dice_{i}", "Engineer", "Acme", "Remote", f"https://e.example/{i}", source="dice"),
+                       "notified", ScoreResult(score=score, model="m", label=label))
+        apps = Applications(store)
+        self.assertEqual({r["job_id"]: r["fit"] for r in apps.review_queue(14)},
+                         {"dice_0": "8.00", "dice_1": "6.85", "dice_2": "6.50", "dice_3": ""})
+        self.assertEqual(apps.get(apps.add_from_job("dice_1", "2026-10-01"))["fit"], "6.85")
+
+    def test_an_application_stored_with_an_old_label_shows_the_number(self):
+        apps = Applications(new_store())
+        app_id = apps.add(title="SWE", company="Acme", applied_at="2026-10-01", fit="fit 6.50/10", fit_score=6.5019)
+        self.assertEqual(apps.get(app_id)["fit"], "6.50")
+

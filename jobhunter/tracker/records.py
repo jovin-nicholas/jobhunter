@@ -71,6 +71,11 @@ def follow_up_date(value: Any, today: date) -> str:
     return _within(value, _years_from(today, -1), _years_from(today, 2))
 
 
+def fit_text(score: Any) -> str:
+    """The fit as the tracker shows it, one way for every scorer: "6.85", or "" without a score."""
+    return f"{float(score):.2f}" if isinstance(score, (int, float)) else ""
+
+
 def safe_url(url: str) -> str:
     """The link when it is http(s), else "": a javascript: or data: link must never reach the page."""
     url = (url or "").strip()
@@ -137,7 +142,7 @@ class Applications:
         title, company, url, board, resume_id, label, score = row
         return {"job_id": job_id, "title": title or "", "company": company or "", "url": url or "",
                 "board": board or "", "resume_id": resume_id or "",
-                "fit": label or (f"{score}/10" if score is not None else ""), "fit_score": score}
+                "fit": fit_text(score), "fit_score": score}
 
     def add_from_job(self, job_id: str, applied_at: str) -> int | None:
         fields = self.job_fields(job_id)
@@ -205,6 +210,8 @@ class Applications:
                     events[r[1]].append({"id": r[0], "kind": r[2], "value": r[3], "at": r[4], "created_at": r[5]})
         for a in apps:
             a["events"] = events[a["id"]]
+            if a["fit_score"] is not None:
+                a["fit"] = fit_text(a["fit_score"])       # rows saved with a scorer's own label show the same way
         return apps
 
     def get(self, app_id: int) -> dict | None:
@@ -263,7 +270,7 @@ class Applications:
                 "ORDER BY f.received_at DESC, f.id DESC LIMIT 1), '') NOT IN ('bad', 'applied') "
                 "ORDER BY j.run_at DESC, j.id DESC LIMIT 200", (cutoff,)).fetchall()
         return [{"job_id": i, "title": t or "", "company": c or "", "url": safe_url(u or ""), "board": b or "",
-                 "fit": label or (f"{score}/10" if score is not None else ""), "fit_score": score, "alerted_at": at}
+                 "fit": fit_text(score), "fit_score": score, "alerted_at": at}
                 for i, t, c, u, b, label, score, at in rows]
 
     def hide_from_review(self, job_id: str) -> None:
