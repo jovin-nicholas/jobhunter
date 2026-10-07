@@ -59,3 +59,24 @@ class TestPage(unittest.TestCase):
     def test_it_follows_the_colour_scheme_and_reduced_motion(self):
         self.assertIn("prefers-color-scheme: dark", self.text)
         self.assertIn("prefers-reduced-motion", self.text)
+
+    def test_buttons_carry_no_key_letters(self):
+        self.assertNotIn('el("kbd"', self.text)                           # shortcuts live in the ? dialog
+        self.assertNotIn("numbers <kbd>", self.text)
+
+    def test_the_add_box_is_labelled_and_has_an_add_button(self):
+        self.assertIn('<label for="quick"', self.text)
+        self.assertIn("Add application", self.text)
+        self.assertIn('id="add-button"', self.text)
+        self.assertIn('id="search-open"', self.text)
+
+    def test_the_job_title_is_the_link_to_the_posting(self):
+        self.assertIn('class: "title-link"', self.text)
+        self.assertNotIn('"open")', self.text)                            # no separate "open" link per row
+
+    def test_action_buttons_are_spaced(self):
+        self.assertIn(".acts-row { display: flex; gap: 8px;", self.text)
+
+    def test_the_drawer_can_delete_an_application(self):
+        self.assertIn("/delete`", self.text)
+        self.assertIn("Delete application", self.text)

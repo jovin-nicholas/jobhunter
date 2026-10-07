@@ -23,7 +23,10 @@ button, input, textarea { font: inherit; color: inherit; }
 header { position: sticky; top: 0; background: var(--paper); border-bottom: 1px solid var(--rule); padding: 12px 20px; z-index: 2; }
 .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .brand { font-weight: 600; letter-spacing: .02em; margin-right: 8px; }
-#quick { flex: 1 1 320px; min-width: 0; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--raised); }
+.add { flex: 1 1 420px; display: flex; gap: 8px; align-items: center; min-width: 0; }
+.add label { font-weight: 600; white-space: nowrap; }
+#quick { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--raised); }
+.primary { background: var(--accent); color: var(--paper); border: 0; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-weight: 600; }
 #search { flex: 1 1 200px; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 6px; background: var(--raised); }
 .link { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 6px; text-decoration: underline dotted; }
 .link.on, .link:hover { color: var(--ink); }
@@ -46,12 +49,16 @@ tr.row:hover td { background: var(--raised); }
 tr.row.focus td { background: var(--accent-soft); }
 tr.closed td { color: var(--muted); }
 .dot { width: 110px; } .company { width: 22%; } .stage { width: 90px; } .age { width: 70px; text-align: right; }
-.fit { width: 90px; } .board { width: 110px; color: var(--muted); } .acts { width: 210px; text-align: right; }
+.fit { width: 70px; } .board { width: 110px; color: var(--muted); } .acts { width: 230px; }
+.acts-row { display: flex; gap: 8px; justify-content: flex-end; }
+a.title-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+a.title-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.danger { margin-top: 18px; border: 1px solid var(--rule); background: none; color: var(--muted); border-radius: 5px; padding: 4px 10px; cursor: pointer; }
+.danger.armed { border-color: #b4442f; color: #b4442f; }
 .mark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); margin-right: 6px; vertical-align: middle; }
 .mark.on { background: var(--accent); border-color: var(--accent); }
 .reason { font-size: 12px; }
 .acts button, .stages button, .small { border: 1px solid var(--rule); background: var(--raised); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
-.acts button + button { margin-left: 4px; }
 kbd { font-size: 11px; color: var(--muted); }
 .empty { color: var(--muted); padding: 10px 8px; }
 .few { color: var(--muted); }
@@ -95,11 +102,15 @@ pre.jd { white-space: pre-wrap; font: 13px/1.5 var(--sans); background: var(--pa
 <header>
   <div class="bar">
     <span class="brand">jobhunter · applications</span>
-    <input id="quick" type="text" autocomplete="off" aria-label="Add an application"
-           placeholder="Paste a job link, or type Company — Title, then Enter">
+    <div class="add">
+      <label for="quick">Add application</label>
+      <input id="quick" type="text" autocomplete="off" placeholder="job link, or Company — Title">
+      <button type="button" class="primary" id="add-button">Add</button>
+    </div>
     <input id="search" type="search" aria-label="Search applications" placeholder="Search company, title, notes" hidden>
+    <button class="link" id="search-open" type="button" title="Search (⌘K)">search</button>
     <button class="link" id="view-list" type="button">list</button>
-    <button class="link" id="view-numbers" type="button">numbers <kbd>v</kbd></button>
+    <button class="link" id="view-numbers" type="button">numbers</button>
     <a class="link" id="export" download="applications.csv">export</a>
     <button class="link" id="help-open" type="button" aria-label="Keyboard shortcuts">?</button>
   </div>
@@ -213,6 +224,12 @@ function renderPipeline() {
   if (!total) document.getElementById("strip").replaceChildren();
 }
 function header(...cols) { return el("thead", {}, el("tr", {}, cols.map(([label, cls]) => el("th", {class: cls, scope: "col"}, label)))); }
+function titleCell(title, url) {
+  const href = safeHref(url);
+  if (!href) return title || "—";
+  return el("a", {href: safeHref(url), class: "title-link", target: "_blank", rel: "noopener noreferrer",
+                  title: "Open the posting", on: {click: e => e.stopPropagation()}}, title || "—");
+}
 function appRow(a) {
   const due = a.due ? until(a.due) : ago(a.age_days);
   return el("tr", {class: `row${state.closed_stages.includes(a.stage) ? " closed" : ""}`, "data-key": `app:${a.id}`,
@@ -220,23 +237,23 @@ function appRow(a) {
     el("td", {class: "dot"}, el("span", {class: a.reason ? "mark on" : "mark", "aria-hidden": "true"}),
        el("span", {class: "reason"}, a.reason || "")),
     el("td", {class: "company"}, a.company || "—"),
-    el("td", {class: "title", title: a.title}, a.title || "—"),
+    el("td", {class: "title", title: a.title}, titleCell(a.title, a.url)),
     el("td", {class: "stage"}, a.stage),
     el("td", {class: "age num"}, due),
     el("td", {class: "fit num"}, a.fit || ""),
     el("td", {class: "board"}, a.board || ""));
 }
 function reviewRow(r) {
-  const act = (label, key, action) => el("button", {type: "button", on: {click: e => { e.stopPropagation(); review(r.job_id, action); }}},
-                                          el("kbd", {}, key), " ", label);
+  const act = (label, key, action) => el("button", {type: "button", title: `${label} (${key})`,
+                                                     on: {click: e => { e.stopPropagation(); review(r.job_id, action); }}}, label);
   return el("tr", {class: "row", "data-key": `review:${r.job_id}`,
                    on: {click: () => { cursor = visible.findIndex(v => v.type === "review" && v.job_id === r.job_id); markCursor(); }}},
     el("td", {class: "company"}, r.company || "—"),
-    el("td", {class: "title", title: r.title}, r.title || "—"),
+    el("td", {class: "title", title: r.title}, titleCell(r.title, r.url)),
     el("td", {class: "age num"}, ago(daysBetween(r.alerted_at, state.today))),
     el("td", {class: "fit num"}, r.fit || ""),
-    el("td", {class: "acts"}, safeHref(r.url) ? el("a", {href: safeHref(r.url), target: "_blank", rel: "noopener noreferrer"}, "open") : null,
-       " ", act("applied", "a", "applied"), act("bad", "b", "bad"), act("hide", "x", "hide")));
+    el("td", {class: "acts"}, el("div", {class: "acts-row"},
+       act("applied", "a", "applied"), act("bad match", "b", "bad"), act("hide", "x", "hide"))));
 }
 function group(title, apps, opts = {}) {
   const head = el("h2", {}, title, " · ", el("span", {class: "count"}, apps.length), opts.toggle || null);
@@ -267,8 +284,8 @@ function renderList() {
       ? el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "age"], ["fit", "fit"], ["", "acts"]),
            el("tbody", {}, review.map(reviewRow)))
       : el("p", {class: "empty"}, "No recent alerts to review."));
-    if (nothing) parts.unshift(el("p", {class: "empty"}, "Mark the alerts you applied to with ", el("kbd", {}, "a"),
-                                  ", or paste a job link above."));
+    if (nothing) parts.unshift(el("p", {class: "empty"}, "Mark the alerts you applied to with “applied” below, or add one "
+                                  + "with “Add application” above."));
   }
   return parts;
 }
@@ -295,33 +312,44 @@ function renderDrawer() {
   drawer.hidden = !a;
   if (!a) { drawer.replaceChildren(); return; }
   const stages = state.stages.map(s => el("button", {type: "button", class: s === a.stage ? "on" : "",
-    on: {click: () => setStage(a.id, s)}}, KEY_OF[s] ? el("kbd", {}, KEY_OF[s]) : null, KEY_OF[s] ? " " : null, s));
+    title: KEY_OF[s] ? `${s} (${KEY_OF[s]})` : s, on: {click: () => setStage(a.id, s)}}, s));
   const follow = el("input", {type: "date", id: "follow-up", value: a.follow_up_at || "",
     on: {blur: e => validDate(e.target.value) && e.target.value !== a.follow_up_at
                     && act(`/api/applications/${a.id}/follow-up`, {date: e.target.value}, "Follow-up set")}});
   drawer.replaceChildren(...kids(
     el("button", {type: "button", class: "close", "aria-label": "Close", on: {click: closeDrawer}}, "×"),
-    el("p", {class: "eyebrow"}, [a.board, a.fit, a.resume_id && `resume: ${a.resume_id}`].filter(Boolean).join(" · ")),
+    el("p", {class: "eyebrow"}, [a.board, a.fit && `fit ${a.fit}`, a.resume_id && `resume: ${a.resume_id}`].filter(Boolean).join(" · ")),
     editable(a, "company", "edit big", "Company"), editable(a, "title", "edit", "Title"),
     safeHref(a.url) ? el("p", {}, el("a", {href: safeHref(a.url), target: "_blank", rel: "noopener noreferrer"}, "Open the posting ↗")) : null,
     el("div", {class: "stages"}, stages,
        el("label", {class: "on-date"}, "on ", el("input", {type: "date", id: "stage-on", "aria-label": "Stage date (empty: today)"}))),
     el("label", {class: "field"}, "Follow up on", follow),
     a.follow_up_at ? el("button", {type: "button", class: "small", on: {click: () => act(`/api/applications/${a.id}/follow-up`, {done: true}, "Follow-up done")}},
-                        el("kbd", {}, "d"), " done") : null,
+                        "follow-up done") : null,
     el("label", {class: "field"}, "Applied on", editable(a, "applied_at", "", "Applied on", "date")),
     el("label", {class: "field"}, "People", editable(a, "people", "", "Jane at Acme, recruiter")),
     el("label", {class: "field"}, "Notes", editable(a, "notes", "", "", "textarea")),
     el("ol", {class: "timeline", reversed: true}, [...a.events].reverse().map(e => el("li", {},
       el("time", {datetime: e.at}, fmt(e.at)),
       e.kind === "stage" ? e.value : e.kind === "follow_up_set" ? `follow up on ${fmt(e.value)}` : "follow-up done"))),
-    a.job_id ? el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showDescription(a.id, e.target)}}, "Show job description")) : null));
+    a.job_id ? el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showDescription(a.id, e.target)}}, "Show job description")) : null,
+    el("button", {type: "button", class: "danger", on: {click: e => deleteApplication(a.id, e.currentTarget)}}, "Delete application")));
 }
 function editable(a, field, cls, placeholder, kind = "text") {
   const props = {class: cls, id: `field-${field}`, value: a[field] || "", placeholder, "aria-label": placeholder || field,
     on: {[kind === "date" ? "blur" : "change"]: e => kind === "date" && (!validDate(e.target.value) || e.target.value === a[field])
                                                      ? null : save(a.id, field, e.target.value)}};
   return kind === "textarea" ? el("textarea", props) : el("input", {...props, type: kind});
+}
+// Deleting asks for a second click within 4 s instead of a dialog; it cannot be undone.
+async function deleteApplication(id, button) {
+  if (!button.classList.contains("armed")) {
+    button.classList.add("armed"); button.textContent = "Click again to delete";
+    setTimeout(() => { button.classList.remove("armed"); button.textContent = "Delete application"; }, 4000);
+    return;
+  }
+  try { await api("POST", `/api/applications/${id}/delete`, {}); closeDrawer(); await refresh(); toast("Application deleted"); }
+  catch (e) { toast(`Not deleted: ${e.message}`); }
 }
 async function save(id, field, value) {
   try { await api("POST", `/api/applications/${id}`, {[field]: value}); await refresh(); }
@@ -393,15 +421,22 @@ function focusField(id) {
   if (node) node.focus();
 }
 
-document.getElementById("quick").addEventListener("keydown", async e => {
-  if (e.key !== "Enter" || !e.target.value.trim()) return;
+async function addApplication() {
+  const input = document.getElementById("quick");
+  if (!input.value.trim()) { input.focus(); return; }
   try {
-    const {id} = await api("POST", "/api/applications", {text: e.target.value});
-    e.target.value = ""; openDrawer(id, false); await refresh();
+    const {id} = await api("POST", "/api/applications", {text: input.value});
+    input.value = ""; openDrawer(id, false); await refresh();
     const a = findApp(id);
     if (a && !a.title) document.getElementById("field-title").focus();
     else if (a && !a.company) document.getElementById("field-company").focus();
   } catch (err) { toast(err.message); }
+}
+document.getElementById("quick").addEventListener("keydown", e => { if (e.key === "Enter") addApplication(); });
+document.getElementById("add-button").addEventListener("click", addApplication);
+document.getElementById("search-open").addEventListener("click", () => {
+  const search = document.getElementById("search");
+  search.hidden = false; search.focus();
 });
 document.getElementById("search").addEventListener("input", e => { query = e.target.value.trim(); render(); });
 document.getElementById("view-list").addEventListener("click", () => { view = "list"; render(); });
