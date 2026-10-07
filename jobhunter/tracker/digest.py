@@ -72,7 +72,7 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _subject(items: dict, today: date) -> str:
+def _subject(items: dict) -> str:
     def companies(entries: list[dict]) -> str:
         return ", ".join(dict.fromkeys(_one_line(e["company"]) or "—" for e in entries))
     if items["today"]:
@@ -130,7 +130,7 @@ def compose(items: dict, today: date) -> tuple[str, str, str] | None:
     text = "\n\n".join(plain) + "\n\n" + footer
     page = ('<div style="font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1c1b19">' + "".join(body)
             + f'<p style="color:#555;margin-top:18px">{html_lib.escape(footer)}</p></div>')
-    return _subject(items, today), text, page
+    return _subject(items), text, page
 
 
 STATE_FILE = "tracker_digest"     # in data/: "2026-10-07" (done for that day) or "2026-10-07 failed 1"
