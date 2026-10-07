@@ -59,8 +59,13 @@ def due_items(apps: list[dict], settings: TrackerSettings, today: date) -> dict:
     return items
 
 
+def _one_line(text: str) -> str:
+    """A line break in a company or title would break the Subject header and the plain-text entry's first line."""
+    return " ".join(text.split())
+
+
 def _subject(items: dict) -> str:
-    companies = ", ".join(dict.fromkeys(e["company"] or "—" for e in items["today"]))
+    companies = ", ".join(dict.fromkeys(_one_line(e["company"]) or "—" for e in items["today"]))
     parts = [f"Due today: {companies}"]
     if items["overdue"]:
         parts.append(f"{len(items['overdue'])} overdue")
@@ -71,7 +76,8 @@ def _subject(items: dict) -> str:
 
 
 def _plain_entry(e: dict) -> str:
-    lines = [f"- {e['company'] or '—'}: {e['title'] or '—'} ({e['stage']}), {e['reason']} {e['when']}"]
+    lines = [f"- {_one_line(e['company']) or '—'}: {_one_line(e['title']) or '—'} ({e['stage']}), {e['reason']} "
+             f"{e['when']}"]
     if e["url"]:
         lines.append(f"  {e['url']}")
     if e["people"]:

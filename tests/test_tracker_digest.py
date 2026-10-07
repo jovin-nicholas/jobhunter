@@ -3,9 +3,12 @@ import tempfile
 import time
 import unittest
 from contextlib import contextmanager
+from email import message_from_string
+from unittest import mock
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from jobhunter.notify import send_email
 from jobhunter.settings import NotifySettings, ScheduleSettings, TrackerSettings
 from jobhunter.store import Store
 from jobhunter.tracker.digest import STATE_FILE, compose, digest_address, due_items, send_digest
@@ -128,6 +131,18 @@ class TestCompose(unittest.TestCase):
         self.assertIn("&lt;b&gt;bold&lt;/b&gt; &amp; co", html)
         self.assertNotIn("javascript:", html)
         self.assertNotIn("<a ", html)
+
+    def test_a_line_break_in_a_company_or_title_stays_on_one_line(self):
+        broken = app(1, follow_up="2026-10-07")
+        broken["company"], broken["title"] = "Acme\nCorp", "Senior\r\nEngineer"
+        subject, plain, html = compose(self.items(broken), TODAY)
+        self.assertEqual(subject, "[jobhunter] Due today: Acme Corp")
+        self.assertIn("- Acme Corp: Senior Engineer (applied), follow up today", plain)
+        env = {"GMAIL_ADDRESS": "sender@example.com", "GMAIL_APP_PASSWORD": "x"}
+        with mock.patch("jobhunter.notify.smtplib.SMTP") as smtp:
+            self.assertTrue(send_email(EMAIL, env, subject, plain, html, self.fail, to="sender+followup@example.com"))
+        raw = smtp.return_value.__enter__.return_value.sendmail.call_args.args[2]
+        self.assertEqual(message_from_string(raw)["Subject"], subject)
 
     def test_one_call_is_singular(self):
         subject, _, _ = compose(self.items(app(1, follow_up="2026-10-07"),
