@@ -1,5 +1,6 @@
-"""The follow-up email: on a day a follow-up, screen or interview falls due, one email listing what is due today,
-overdue follow-ups and calls this week, with each job's link, people and notes. No buttons: only the job links."""
+"""The follow-up email: when a follow-up, screen or interview has fallen due since the last digest day, one email
+listing what is due today, overdue follow-ups and calls this week, with each job's link, people and notes. No buttons:
+only the job links."""
 from __future__ import annotations
 
 import html as html_lib
@@ -29,8 +30,11 @@ def _on(day: date, today: date) -> str:
     return "tomorrow" if day == today + timedelta(days=1) else f"{day:%a} {day:%b} {day.day}"
 
 
-def due_items(apps: list[dict], settings: TrackerSettings, today: date) -> dict:
-    items: dict = {"today": [], "overdue": [], "this_week": [], "quiet": 0, "quiet_days": settings.ghost_after_days}
+def due_items(apps: list[dict], settings: TrackerSettings, today: date, since: date | None = None) -> dict:
+    """What the email lists. `new_since` holds the listed entries that fell due after `since`, the last digest day,
+    up to today (today only when `since` is None): those make the email go, so each item triggers it once."""
+    items: dict = {"today": [], "overdue": [], "this_week": [], "new_since": [], "quiet": 0,
+                   "quiet_days": settings.ghost_after_days}
     iso, week_end = today.isoformat(), today + timedelta(days=CALL_DAYS)
 
     def entry(app: dict, reason: str, when: str, sort: str) -> dict:
@@ -56,6 +60,8 @@ def due_items(apps: list[dict], settings: TrackerSettings, today: date) -> dict:
             items["quiet"] += 1
     for key in ("today", "overdue", "this_week"):
         items[key].sort(key=lambda e: (e["sort"], e["company"].lower(), e["id"]))
+    after = (since or today - timedelta(days=1)).isoformat()
+    items["new_since"] = [e for e in items["overdue"] + items["today"] if after < e["sort"] <= iso]
     return items
 
 
@@ -64,9 +70,14 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _subject(items: dict) -> str:
-    companies = ", ".join(dict.fromkeys(_one_line(e["company"]) or "—" for e in items["today"]))
-    parts = [f"Due today: {companies}"]
+def _subject(items: dict, today: date) -> str:
+    def companies(entries: list[dict]) -> str:
+        return ", ".join(dict.fromkeys(_one_line(e["company"]) or "—" for e in entries))
+    if items["today"]:
+        parts = [f"Due today: {companies(items['today'])}"]
+    else:
+        first = date.fromisoformat(min(e["sort"] for e in items["new_since"]))
+        parts = [f"Due since {first:%a} {first:%b} {first.day}: {companies(items['new_since'])}"]
     if items["overdue"]:
         parts.append(f"{len(items['overdue'])} overdue")
     if items["this_week"]:
@@ -100,9 +111,9 @@ def _html_entry(e: dict) -> str:
 
 
 def compose(items: dict, today: date) -> tuple[str, str, str] | None:
-    """(subject, plain text, HTML), or None when nothing falls due today: overdue items and calls this week alone
-    send nothing, since an overdue follow-up was already in the email on its own day."""
-    if not items["today"]:
+    """(subject, plain text, HTML), or None when nothing fell due since the last digest day: older overdue items and
+    calls this week alone send nothing, since they were already in an earlier email."""
+    if not items["new_since"]:
         return None
     plain, body = [], []
     for key, heading in GROUPS:
@@ -117,7 +128,7 @@ def compose(items: dict, today: date) -> tuple[str, str, str] | None:
     text = "\n\n".join(plain) + "\n\n" + footer
     page = ('<div style="font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1c1b19">' + "".join(body)
             + f'<p style="color:#555;margin-top:18px">{html_lib.escape(footer)}</p></div>')
-    return _subject(items), text, page
+    return _subject(items, today), text, page
 
 
 STATE_FILE = "tracker_digest"     # in data/: "2026-10-07" (done for that day) or "2026-10-07 failed 1"
@@ -132,7 +143,7 @@ def digest_address(cfg: dict, env: Mapping[str, str], tag: str) -> str:
 def _read_state(path: Any) -> tuple[str, int]:
     try:
         parts = path.read_text(encoding="utf-8").split()
-    except OSError:
+    except (OSError, ValueError):
         return "", 0
     if not parts:
         return "", 0
@@ -145,9 +156,19 @@ def _write_state(path: Any, day: str, failures: int = 0) -> None:
     path.write_text(day + (f" failed {failures}" if failures else "") + "\n", encoding="utf-8")
 
 
+def _since(last: str, failures: int) -> date | None:
+    """The last digest day: items due after it make the email go. A day whose email failed was not delivered, so its
+    own items still count (the day before it is used); an unreadable day means today only."""
+    try:
+        day = date.fromisoformat(last)
+    except ValueError:
+        return None
+    return day - timedelta(days=1) if failures else day
+
+
 def send_digest(settings: Any, store: Any, now: datetime, send: Callable[[str, str, str], bool]) -> str | None:
     """Send today's follow-up email if it is on, it is digest_at or later locally, today's has not gone yet and
-    something falls due today. Returns a line for the run log, or None when there is nothing to say."""
+    something fell due since the last digest day. Returns a line for the run log, or None when there is nothing to say."""
     tracker = settings.tracker
     if not tracker.follow_up_email or not settings.notify.email:
         return None
@@ -158,7 +179,8 @@ def send_digest(settings: Any, store: Any, now: datetime, send: Callable[[str, s
     last, failures = _read_state(path)
     if last == day and (failures == 0 or failures >= MAX_FAILURES):
         return None
-    message = compose(due_items(Applications(store).all(), tracker, local.date()), local.date())
+    message = compose(due_items(Applications(store).all(), tracker, local.date(), _since(last, failures)),
+                      local.date())
     if message is None:
         _write_state(path, day)
         return None

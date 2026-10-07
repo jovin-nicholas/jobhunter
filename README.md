@@ -217,9 +217,10 @@ The page runs only on this computer (`127.0.0.1`, with a key in its address), wo
 in [docs/settings.md](docs/settings.md#tracker); applications kept in a spreadsheet can be brought in once with
 `tracker-import`.
 
-With `tracker: {follow_up_email: true}` (and email alerts set up), the first run after 8am on a day a follow-up,
-screen or interview falls due sends one email to your alert address plus `+followup`: what is due today, overdue
-follow-ups and calls this week, each with its job link, people and notes. `send-test-digest` sends today's now.
+With `tracker: {follow_up_email: true}` (and email alerts set up), the first run after 8am once a follow-up,
+screen or interview has fallen due (since the last such email, so one due on a quiet weekend isn't lost) sends one
+email to your alert address plus `+followup`: what is due today, overdue follow-ups and calls this week, each with its
+job link, people and notes. `send-test-digest` sends today's now.
 
 ## Known limitations
 

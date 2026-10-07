@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from email import message_from_string
 from unittest import mock
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from jobhunter.notify import send_email
@@ -93,6 +94,13 @@ class TestDueItems(unittest.TestCase):
         self.assertEqual(items["overdue"][0]["when"], "1 day late")
         self.assertEqual(items["this_week"][0]["when"], "tomorrow")
 
+    def test_new_since_holds_what_fell_due_after_the_last_digest_day(self):
+        apps = [app(1, follow_up="2026-10-07"), app(2, follow_up="2026-10-05"), app(3, follow_up="2026-10-02"),
+                app(4, "screen", events=[("screen", "2026-10-09", "2026-10-05")])]
+        since = due_items(apps, TrackerSettings(), TODAY, since=date(2026, 10, 3))
+        self.assertEqual(sorted(e["id"] for e in since["new_since"]), [1, 2])       # 3 was due before; 4 not yet
+        self.assertEqual([e["id"] for e in due_items(apps, TrackerSettings(), TODAY)["new_since"]], [1])  # today only
+
     def test_quiet_days_reflects_settings(self):
         items = due_items([app(1, applied="2026-09-01")], TrackerSettings(ghost_after_days=21), TODAY)
         self.assertEqual(items["quiet_days"], 21)
@@ -143,6 +151,12 @@ class TestCompose(unittest.TestCase):
             self.assertTrue(send_email(EMAIL, env, subject, plain, html, self.fail, to="sender+followup@example.com"))
         raw = smtp.return_value.__enter__.return_value.sendmail.call_args.args[2]
         self.assertEqual(message_from_string(raw)["Subject"], subject)
+
+    def test_an_overdue_item_new_since_the_last_digest_day_sends(self):
+        items = due_items([app(1, follow_up="2026-10-05")], TrackerSettings(), TODAY, since=date(2026, 10, 2))
+        subject, plain, _ = compose(items, TODAY)
+        self.assertEqual(subject, "[jobhunter] Due since Mon Oct 5: Co1 · 1 overdue")
+        self.assertIn("Overdue\n- Co1", plain)
 
     def test_one_call_is_singular(self):
         subject, _, _ = compose(self.items(app(1, follow_up="2026-10-07"),
@@ -213,6 +227,46 @@ class TestSendDigest(unittest.TestCase):
         self.assertIn("not tried again today", send_digest(s, self.store, self.at("09:05"), self.send(ok=False)))
         self.assertIsNone(send_digest(s, self.store, self.at("10:05"), self.send(ok=False)))
         self.assertEqual(len(self.sent), 2)
+
+    def run_on(self, s, day, local, ok=True):          # a New York wall-clock time on `day`
+        now = datetime.combine(date.fromisoformat(day), datetime.strptime(local, "%H:%M").time(),
+                               ZoneInfo("America/New_York")).astimezone(timezone.utc)
+        self.plain = []
+
+        def sender(subject, plain, html):
+            self.sent.append(subject)
+            self.plain.append(plain)
+            return ok
+        return send_digest(s, self.store, now, sender)
+
+    def test_a_follow_up_due_over_a_quiet_weekend_is_sent_on_monday(self):
+        Applications(self.store).add(title="Engineer", company="Globex", applied_at="2026-10-03")  # due Sat 10-10
+        (self.folder / STATE_FILE).write_text("2026-10-09\n")
+        self.assertIn("sent", self.run_on(FakeSettings(self.folder), "2026-10-12", "08:00"))
+        self.assertEqual(self.sent, ["[jobhunter] Due since Sat Oct 10: Globex · 2 overdue"])
+        self.assertIn("- Globex: Engineer (applied), follow up 2 days late", self.plain[0])
+        self.assertIn("- Acme: Engineer (applied), follow up 5 days late", self.plain[0])   # listed, but not the trigger
+
+    def test_two_failures_on_the_due_day_then_the_next_day_sends(self):
+        s = FakeSettings(self.folder)
+        self.run_on(s, "2026-10-07", "08:05", ok=False)
+        self.run_on(s, "2026-10-07", "09:05", ok=False)
+        self.assertIn("sent", self.run_on(s, "2026-10-08", "08:05"))
+        self.assertEqual(self.sent[-1], "[jobhunter] Due since Wed Oct 7: Acme · 1 overdue")
+        self.assertIsNone(self.run_on(s, "2026-10-09", "08:05"))                     # once only
+        self.assertEqual(len(self.sent), 3)
+
+    def test_an_item_overdue_before_the_last_digest_day_does_not_send_by_itself(self):
+        (self.folder / STATE_FILE).write_text("2026-10-09\n")
+        self.assertIsNone(self.run_on(FakeSettings(self.folder), "2026-10-12", "08:00"))
+        self.assertEqual(self.sent, [])
+
+    def test_no_or_unreadable_state_file_means_today_only(self):
+        Applications(self.store).add(title="Engineer", company="Globex", applied_at="2026-10-03")  # due Sat 10-10
+        self.assertIsNone(self.run_on(FakeSettings(self.folder), "2026-10-12", "08:00"))
+        (self.folder / STATE_FILE).write_bytes(b"\xff\xfe garbled")
+        self.assertIsNone(self.run_on(FakeSettings(self.folder), "2026-10-13", "08:00"))
+        self.assertEqual(self.sent, [])
 
     def test_the_address_adds_the_tag_to_the_alerts_recipient(self):
         env = {"GMAIL_ADDRESS": "sender@example.com", "NOTIFY_EMAIL": "john.doe@example.com"}
