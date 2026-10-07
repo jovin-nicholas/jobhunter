@@ -305,6 +305,18 @@ class Applications:
         with self.store.connect() as conn:
             conn.execute("DELETE FROM feedback WHERE message_id = ?", (message_id,))
 
+    def delete(self, app_id: int) -> None:
+        """Delete an application made by mistake, with its events and its job's `applied` labels (tracker and email),
+        so the job is back in the review queue and the email catch-up does not bring it back. KeyError when unknown."""
+        app = self.get(app_id)
+        if app is None:
+            raise KeyError(app_id)
+        with self.store.connect() as conn:
+            if app["job_id"]:
+                conn.execute("DELETE FROM feedback WHERE job_id = ? AND verdict = 'applied'", (app["job_id"],))
+            conn.execute("DELETE FROM application_events WHERE application_id = ?", (app_id,))
+            conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
+
     def delete_application(self, app_id: int) -> None:
         """Only for undoing a review a that created this application; there is no general delete."""
         with self.store.connect() as conn:

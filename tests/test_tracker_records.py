@@ -285,3 +285,33 @@ class TestFitIsOneFormat(unittest.TestCase):
         app_id = apps.add(title="SWE", company="Acme", applied_at="2026-10-01", fit="fit 6.50/10", fit_score=6.5019)
         self.assertEqual(apps.get(app_id)["fit"], "6.50")
 
+
+class TestDeleteApplication(unittest.TestCase):
+    def test_delete_removes_the_application_its_events_and_its_applied_labels(self):
+        store = new_store()
+        acme(store)
+        apps = Applications(store)
+        app_id = apps.add_from_job("dice_1", "2026-10-01")
+        apps.add_event(app_id, "stage", "screen", "2026-10-03")
+        apps.record_verdict("dice_1", "applied")
+        store.add_feedback([{"job_id": "dice_1", "verdict": "applied", "received_at": "2026-10-01T09:00:00+00:00",
+                             "message_id": "<m1@example.com>"}])
+        apps.delete(app_id)
+        self.assertEqual(apps.all(), [])
+        self.assertEqual(store.latest_feedback(), [])
+        self.assertEqual(apps.apply_verdicts(), 0)                    # the email catch-up does not bring it back
+        self.assertEqual([r["job_id"] for r in apps.review_queue(14)], ["dice_1"])
+        with self.assertRaises(KeyError):
+            apps.delete(app_id)
+
+    def test_delete_keeps_a_bad_label_and_other_jobs(self):
+        store = new_store()
+        acme(store)
+        acme(store, job_id="dice_2", url="https://jobs.example.com/acme/2")
+        apps = Applications(store)
+        keep = apps.add_from_job("dice_2", "2026-10-01")
+        gone = apps.add_from_job("dice_1", "2026-10-01")
+        apps.record_verdict("dice_2", "applied")
+        apps.delete(gone)
+        self.assertEqual([a["id"] for a in apps.all()], [keep])
+        self.assertEqual([r["job_id"] for r in store.latest_feedback()], ["dice_2"])

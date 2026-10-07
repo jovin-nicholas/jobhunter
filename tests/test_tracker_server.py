@@ -236,5 +236,16 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(parse_quick_add("Acme"), ("", "Acme", ""))
 
 
+
+class TestDelete(ServerTestCase):
+    def test_delete_route_removes_the_application(self):
+        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
+        status, _, body = self.call("POST", f"/api/applications/{app_id}/delete", {})
+        self.assertEqual((status, json.loads(body)), (200, {"ok": True}))
+        self.assertEqual(self.apps.all(), [])
+        self.assertEqual(self.call("POST", f"/api/applications/{app_id}/delete", {})[0], 400)
+        self.assertEqual(self.call("POST", f"/api/applications/{app_id}/delete", {}, token=None)[0], 403)
+
+
 if __name__ == "__main__":
     unittest.main()

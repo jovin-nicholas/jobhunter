@@ -31,7 +31,7 @@ CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline
 EXPORT_COLUMNS = ("company", "title", "url", "stage", "applied_at", "stage_at", "follow_up_at", "board", "fit",
                   "resume_id", "people", "notes")
 _SPLIT = re.compile(r"\s+[—–-]\s+")          # "Acme — Backend Engineer" (but "Rolls-Royce" stays whole)
-_APP_PATH = re.compile(r"/api/applications/(\d+)(/stage|/follow-up|/description)?")
+_APP_PATH = re.compile(r"/api/applications/(\d+)(/stage|/follow-up|/description|/delete)?")
 
 
 @lru_cache(maxsize=1)
@@ -151,6 +151,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, {"id": self._quick_add(body, today)})
         if method == "POST" and m and m.group(2) is None:
             apps.update(int(m.group(1)), **body)
+            return self._json(200, {"ok": True})
+        if method == "POST" and m and m.group(2) == "/delete":
+            apps.delete(int(m.group(1)))
             return self._json(200, {"ok": True})
         if method == "POST" and m and m.group(2) == "/stage":
             return self._json(200, {"event_ids": self._set_stage(int(m.group(1)), body, today)})
