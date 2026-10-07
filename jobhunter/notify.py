@@ -114,6 +114,28 @@ def _html(job: Job, result: ScoreResult, resume_id: str, links: list[tuple[str, 
         f'{letter}</td></tr></table></body></html>')
 
 
+def send_email(cfg: dict, env: Mapping[str, str], subject: str, plain: str, html_body: str,
+               log: Callable[[str], None], to: str | None = None, what: str = "") -> bool:
+    """One email, plain text plus HTML, from the alert account (Gmail SMTP); `to` defaults to where alerts go. A
+    failure is logged by its type only, never with the password, and returns False."""
+    sender, alert_to, _ = email_addresses(cfg, env)
+    to = to or alert_to
+    msg = MIMEMultipart("alternative")
+    msg.attach(MIMEText(plain, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    msg["Subject"], msg["From"], msg["To"] = subject, sender, to
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(sender, env.get(cfg["password_env"], ""))
+            server.sendmail(sender, to, msg.as_string())
+    except Exception as e:
+        log(f"Email send failed [{what or _one_line(subject)}]: {_failure(e)}")
+        return False
+    return True
+
+
 class Notifier:
     def __init__(self, settings: NotifySettings, env: Mapping[str, str] | None = None,
                  log: Callable[[str], None] = print):
@@ -145,25 +167,12 @@ class Notifier:
 
     def _email(self, job: Job, result: ScoreResult, resume_id: str, cover_letter: str | None) -> bool:
         cfg = self.settings.email
-        sender, to, feedback_to = email_addresses(cfg, self.env)
-        password = self.env.get(cfg["password_env"], "")
+        _, _, feedback_to = email_addresses(cfg, self.env)
         links = [(label, mailto(feedback_to, verdict, job)) for verdict, label in BUTTONS]
         plain = (_summary(job, result, resume_id, for_email=True) + "\n\nWorth it? Tap one, then send the email it opens:\n"
                  + "\n".join(f"{label}: {href}" for label, href in links))
         if cover_letter:
             plain += f"\n\nCover letter draft:\n{cover_letter}"
-        msg = MIMEMultipart("alternative")
-        msg.attach(MIMEText(plain, "plain", "utf-8"))
-        msg.attach(MIMEText(_html(job, result, resume_id, links, cover_letter), "html", "utf-8"))
-        msg["Subject"] = f"[{score_label(result)}] {_one_line(job.title)} at {_one_line(job.company)} ({job.source})"
-        msg["From"], msg["To"] = sender, to
-        try:
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-                server.ehlo()
-                server.starttls()
-                server.login(sender, password)
-                server.sendmail(sender, to, msg.as_string())
-        except Exception as e:
-            self.log(f"Email send failed [{_one_line(job.title)}]: {_failure(e)}")
-            return False
-        return True
+        subject = f"[{score_label(result)}] {_one_line(job.title)} at {_one_line(job.company)} ({job.source})"
+        return send_email(cfg, self.env, subject, plain, _html(job, result, resume_id, links, cover_letter), self.log,
+                          what=_one_line(job.title))

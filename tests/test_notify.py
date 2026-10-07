@@ -207,5 +207,31 @@ class TestOpenJobLink(unittest.TestCase):
 
 
 
+class TestSendEmail(unittest.TestCase):
+    def test_sends_one_email_to_the_given_address(self):
+        from jobhunter.notify import send_email
+        smtp, logs = MagicMock(), []
+        with patch("jobhunter.notify.smtplib.SMTP", return_value=smtp):
+            ok = send_email(BOTH.email, ENV, "Subject", "plain text", "<p>html</p>", logs.append,
+                            to="john.doe+followup@example.com", what="follow-up email")
+        self.assertTrue(ok)
+        server = smtp.__enter__.return_value
+        server.login.assert_called_once_with("sender@example.com", "app-pass")
+        sender, to, raw = server.sendmail.call_args.args
+        self.assertEqual((sender, to), ("sender@example.com", "john.doe+followup@example.com"))
+        msg = email.message_from_string(raw)
+        self.assertEqual((msg["Subject"], msg["To"]), ("Subject", "john.doe+followup@example.com"))
+        self.assertEqual([p.get_content_type() for p in msg.get_payload()], ["text/plain", "text/html"])
+
+    def test_to_defaults_to_the_alerts_recipient_and_failures_are_logged_without_secrets(self):
+        from jobhunter.notify import send_email
+        smtp, logs = MagicMock(), []
+        smtp.__enter__.return_value.login.side_effect = OSError("bad app-pass")
+        with patch("jobhunter.notify.smtplib.SMTP", return_value=smtp):
+            self.assertFalse(send_email(BOTH.email, ENV, "S", "p", "<p>h</p>", logs.append, what="follow-up email"))
+        self.assertEqual(len(logs), 1)
+        self.assertIn("follow-up email", logs[0])
+        self.assertNotIn("app-pass", logs[0])
+
 if __name__ == "__main__":
     unittest.main()
