@@ -169,6 +169,9 @@ Settings for `jobhunter tracker`, the application tracker. All optional.
 | `review_days` | `14` | The review queue shows notified jobs from this many days back |
 | `follow_up_days` | `{applied: 7, screen: 3, interview: 3}` | Days until the follow-up date set when an application moves to that stage |
 | `fetch_titles` | `false` | Quick add fetches the title and company of a pasted link that is not in `jobs.db` (only public http(s) addresses) |
+| `follow_up_email` | `false` | At `digest_at` on a day a follow-up, screen or interview falls due, email what is due today, overdue follow-ups and calls this week (with people and notes) to the alerts' recipient plus `+digest_tag`; needs `notify.email` |
+| `digest_at` | `"08:00"` | Local time (`schedule.timezone`) from which that day's email is sent, by the first run at or after it |
+| `digest_tag` | `followup` | Plus tag on the recipient (`you+followup@gmail.com`), for a Gmail filter; must differ from `alert_tag` and `feedback_tag` |
 
 ## notify
 

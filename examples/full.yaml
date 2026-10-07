@@ -119,6 +119,9 @@ schedule:                               # used by scheduler.py and `run --schedu
 #   review_days: 14                     # alerts this recent appear in the review queue
 #   follow_up_days: {applied: 7, screen: 3, interview: 3}
 #   fetch_titles: false                 # true: quick add fetches a pasted link's title (makes a web request)
+#   follow_up_email: false              # true: 8am email on days a follow-up or call falls due (needs notify.email)
+#   digest_at: "08:00"
+#   digest_tag: followup                # sent to <alert address>+followup
 
 # notify:
 #   slack: {webhook_env: SLACK_WEBHOOK_URL}

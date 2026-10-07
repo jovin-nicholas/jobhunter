@@ -160,6 +160,8 @@ class CoverLetterSettings:
 
 
 TRACKER_FOLLOW_UP_DAYS = {"applied": 7, "screen": 3, "interview": 3}
+DEFAULT_DIGEST_TAG = "followup"
+_CLOCK = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
 @dataclass
@@ -168,6 +170,9 @@ class TrackerSettings:
     review_days: int = 14                 # how far back the review queue shows alerts
     follow_up_days: dict[str, int] = field(default_factory=lambda: dict(TRACKER_FOLLOW_UP_DAYS))
     fetch_titles: bool = False            # quick add fetches the title of a pasted link not in jobs.db
+    follow_up_email: bool = False         # email at digest_at on a day something falls due (needs notify.email)
+    digest_at: str = "08:00"              # local HH:MM; the first run at or after it sends that day's email
+    digest_tag: str = DEFAULT_DIGEST_TAG  # plus tag added to the alerts' recipient: you+followup@...
 
 
 @dataclass
@@ -271,6 +276,11 @@ def load_settings(path: str | Path, env: Mapping[str, str] | None = None) -> Set
     cover_letters = _cover_letters(c, raw.get("cover_letters"), scorers)
     schedule = _schedule(c, raw.get("schedule"))
     tracker = _tracker(c, raw.get("tracker"))
+    if tracker.follow_up_email and not notify.email:
+        c.add("tracker.follow_up_email", "needs notify.email: the follow-up email is sent with the alert email settings")
+    if notify.email and tracker.digest_tag in (str(notify.email.get("alert_tag", DEFAULT_ALERT_TAG)),
+                                               str(notify.email.get("feedback_tag", DEFAULT_FEEDBACK_TAG))):
+        c.add("tracker.digest_tag", "must differ from notify.email's alert_tag and feedback_tag")
     _check_env(c, scorers, notify, discovery, env)
     if c.problems:
         raise SettingsError([f"{path.name}: {p}" for p in c.problems])
@@ -628,7 +638,7 @@ def _schedule(c: _Checker, raw: Any) -> ScheduleSettings:
 
 
 def _tracker(c: _Checker, raw: Any) -> TrackerSettings:
-    raw = c.mapping("tracker", raw, {"ghost_after_days", "review_days", "follow_up_days", "fetch_titles"})
+    raw = c.mapping("tracker", raw, {"ghost_after_days", "review_days", "follow_up_days", "fetch_titles", "follow_up_email", "digest_at", "digest_tag"})
     out = TrackerSettings()
     for key in ("ghost_after_days", "review_days"):
         if raw.get(key) is not None:
@@ -642,6 +652,21 @@ def _tracker(c: _Checker, raw: Any) -> TrackerSettings:
             if n is not None:
                 out.follow_up_days[stage] = n
     out.fetch_titles = c.boolean("tracker.fetch_titles", raw.get("fetch_titles"), False)
+    out.follow_up_email = c.boolean("tracker.follow_up_email", raw.get("follow_up_email"), False)
+    value = raw.get("digest_at")
+    if value is not None:
+        # YAML 1.1 reads an unquoted 9:30 as the base-60 number 570.
+        text = f"{value // 60:02d}:{value % 60:02d}" if isinstance(value, int) and not isinstance(value, bool) \
+            else str(value).strip()
+        if _CLOCK.match(text):
+            out.digest_at = text
+        else:
+            c.add("tracker.digest_at", 'expected "HH:MM" in 24-hour time, e.g. "08:00"')
+    if raw.get("digest_tag") is not None:
+        if TAG_RE.match(str(raw["digest_tag"])):
+            out.digest_tag = str(raw["digest_tag"])
+        else:
+            c.add("tracker.digest_tag", "use letters, digits, - and _ only")
     return out
 
 

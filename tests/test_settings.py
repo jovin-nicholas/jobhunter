@@ -319,3 +319,35 @@ class TestTrackerSettings(unittest.TestCase):
         a, b = self.load().tracker, self.load().tracker
         a.follow_up_days["applied"] = 99
         self.assertEqual(b.follow_up_days["applied"], 7)
+
+    EMAIL = ("notify:\n  email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD}\n")
+    EMAIL_ENV = {"SLACK_WEBHOOK_URL": "x", "GMAIL_ADDRESS": "sender@example.com", "GMAIL_APP_PASSWORD": "app-pass"}
+
+    def load_with_email(self, extra):
+        text = VALID.replace("notify:\n  slack: {webhook_env: SLACK_WEBHOOK_URL}\n", self.EMAIL)
+        path = write_project(Path(tempfile.mkdtemp()).resolve(), text.rstrip("\n") + "\n" + extra, RESUMES)
+        return load_settings(path, env=self.EMAIL_ENV)
+
+    def test_digest_defaults(self):
+        t = self.load().tracker
+        self.assertEqual((t.follow_up_email, t.digest_at, t.digest_tag), (False, "08:00", "followup"))
+
+    def test_digest_values(self):
+        t = self.load_with_email('tracker: {follow_up_email: true, digest_at: "07:30", digest_tag: chase}\n').tracker
+        self.assertEqual((t.follow_up_email, t.digest_at, t.digest_tag), (True, "07:30", "chase"))
+
+    def test_an_unquoted_time_yaml_reads_as_minutes_still_works(self):
+        self.assertEqual(self.load_with_email("tracker: {digest_at: 9:30}\n").tracker.digest_at, "09:30")
+
+    def test_bad_digest_values_are_settings_errors(self):
+        for extra, key in (('tracker: {digest_at: "25:00"}\n', "tracker.digest_at"),
+                           ("tracker: {digest_tag: 'a b'}\n", "tracker.digest_tag"),
+                           ("tracker: {digest_tag: jobhunter}\n", "tracker.digest_tag")):
+            with self.subTest(extra=extra), self.assertRaises(SettingsError) as caught:
+                self.load_with_email(extra)
+            self.assertTrue(any(key in p for p in caught.exception.problems), caught.exception.problems)
+
+    def test_the_email_needs_notify_email(self):
+        with self.assertRaises(SettingsError) as caught:
+            self.load("tracker: {follow_up_email: true}\n")
+        self.assertTrue(any("tracker.follow_up_email" in p and "notify.email" in p for p in caught.exception.problems))
