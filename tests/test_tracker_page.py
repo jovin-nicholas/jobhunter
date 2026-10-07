@@ -77,6 +77,9 @@ class TestPage(unittest.TestCase):
     def test_action_buttons_are_spaced(self):
         self.assertIn(".acts-row { display: flex; gap: 8px;", self.text)
 
+    def test_a_missing_fit_says_why(self):
+        self.assertIn("no fit score", self.text)
+
     def test_the_drawer_can_delete_an_application(self):
         self.assertIn("/delete`", self.text)
         self.assertIn("Delete application", self.text)

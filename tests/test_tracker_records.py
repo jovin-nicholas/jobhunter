@@ -286,6 +286,25 @@ class TestFitIsOneFormat(unittest.TestCase):
         self.assertEqual(apps.get(app_id)["fit"], "6.50")
 
 
+
+class TestDecisionOnlyScores(unittest.TestCase):
+    """A Laya checkpoint trained on a decision (alert, save, skip) stores a placeholder 8/6/3, not a fit: it shows as no
+    fit, and the fit bands leave it out. Other scorers' whole-number scores are real fits."""
+
+    def test_only_real_fits_show(self):
+        store = new_store()
+        cases = [(8, "laya:~/models/checkpoint", ""), (6.5019, "laya:~/models/questions", ""),
+                 (7, "laya:~/models/questions", "fit 7.00/10"), (8, "ollama:gemma4:e4b", ""), (8, "laya", "")]
+        for i, (score, model, label) in enumerate(cases):
+            store.save(Job(f"dice_{i}", "Engineer", "Acme", "Remote", f"https://e.example/{i}", source="dice"),
+                       "notified", ScoreResult(score=score, model=model, label=label))
+        apps = Applications(store)
+        fits = {r["job_id"]: (r["fit"], r["fit_score"]) for r in apps.review_queue(14)}
+        self.assertEqual(fits, {"dice_0": ("", None), "dice_1": ("6.50", 6.5019), "dice_2": ("7.00", 7),
+                                "dice_3": ("8.00", 8), "dice_4": ("", None)})
+        placeholder = apps.get(apps.add_from_job("dice_0", "2026-10-01"))
+        self.assertEqual((placeholder["fit"], placeholder["fit_score"]), ("", None))
+
 class TestDeleteApplication(unittest.TestCase):
     def test_delete_removes_the_application_its_events_and_its_applied_labels(self):
         store = new_store()

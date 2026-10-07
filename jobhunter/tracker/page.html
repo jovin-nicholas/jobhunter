@@ -224,6 +224,8 @@ function renderPipeline() {
   if (!total) document.getElementById("strip").replaceChildren();
 }
 function header(...cols) { return el("thead", {}, el("tr", {}, cols.map(([label, cls]) => el("th", {class: cls, scope: "col"}, label)))); }
+// No fit: the job was judged by a decision-only checkpoint (alert, save or skip), or never scored.
+function fitCell(fit) { return fit || el("span", {title: "no fit score (decided without one, or not scored)"}, "—"); }
 function titleCell(title, url) {
   const href = safeHref(url);
   if (!href) return title || "—";
@@ -240,7 +242,7 @@ function appRow(a) {
     el("td", {class: "title", title: a.title}, titleCell(a.title, a.url)),
     el("td", {class: "stage"}, a.stage),
     el("td", {class: "age num"}, due),
-    el("td", {class: "fit num"}, a.fit || ""),
+    el("td", {class: "fit num"}, fitCell(a.fit)),
     el("td", {class: "board"}, a.board || ""));
 }
 function reviewRow(r) {
@@ -251,7 +253,7 @@ function reviewRow(r) {
     el("td", {class: "company"}, r.company || "—"),
     el("td", {class: "title", title: r.title}, titleCell(r.title, r.url)),
     el("td", {class: "age num"}, ago(daysBetween(r.alerted_at, state.today))),
-    el("td", {class: "fit num"}, r.fit || ""),
+    el("td", {class: "fit num"}, fitCell(r.fit)),
     el("td", {class: "acts"}, el("div", {class: "acts-row"},
        act("applied", "a", "applied"), act("bad match", "b", "bad"), act("hide", "x", "hide"))));
 }

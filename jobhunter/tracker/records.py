@@ -71,6 +71,16 @@ def follow_up_date(value: Any, today: date) -> str:
     return _within(value, _years_from(today, -1), _years_from(today, 2))
 
 
+def fit_of(score: Any, label: str | None, model: str | None) -> float | None:
+    """The job's fit score, or None when its score is a decision placeholder: a Laya checkpoint trained on alert,
+    save or skip stores 8, 6 or 3 with no fit label, which is not a fit and must not land in the fit bands."""
+    if not isinstance(score, (int, float)):
+        return None
+    if (model or "").startswith("laya") and not label and float(score).is_integer():
+        return None
+    return score
+
+
 def fit_text(score: Any) -> str:
     """The fit as the tracker shows it, one way for every scorer: "6.85", or "" without a score."""
     return f"{float(score):.2f}" if isinstance(score, (int, float)) else ""
@@ -135,11 +145,13 @@ class Applications:
     def job_fields(self, job_id: str) -> dict | None:
         """What an application copies from a stored job; None when the job is not in jobs.db."""
         with self.store.connect() as conn:
-            row = conn.execute("SELECT title, company, url, source, resume_id, score_label, match_score FROM jobs "
+            row = conn.execute("SELECT title, company, url, source, resume_id, score_label, match_score, source_model "
+                               "FROM jobs "
                                "WHERE id = ?", (job_id,)).fetchone()
         if row is None:
             return None
-        title, company, url, board, resume_id, label, score = row
+        title, company, url, board, resume_id, label, score, model = row
+        score = fit_of(score, label, model)
         return {"job_id": job_id, "title": title or "", "company": company or "", "url": url or "",
                 "board": board or "", "resume_id": resume_id or "",
                 "fit": fit_text(score), "fit_score": score}
@@ -262,7 +274,8 @@ class Applications:
         cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).isoformat()
         with self.store.connect() as conn:
             rows = conn.execute(
-                "SELECT j.id, j.title, j.company, j.url, j.source, j.score_label, j.match_score, j.run_at FROM jobs j "
+                "SELECT j.id, j.title, j.company, j.url, j.source, j.score_label, j.match_score, j.run_at, "
+                "j.source_model FROM jobs j "
                 "WHERE j.status = 'notified' AND j.run_at >= ? "
                 "AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id) "
                 "AND NOT EXISTS (SELECT 1 FROM review_hidden h WHERE h.job_id = j.id) "
@@ -270,8 +283,8 @@ class Applications:
                 "ORDER BY f.received_at DESC, f.id DESC LIMIT 1), '') NOT IN ('bad', 'applied') "
                 "ORDER BY j.run_at DESC, j.id DESC LIMIT 200", (cutoff,)).fetchall()
         return [{"job_id": i, "title": t or "", "company": c or "", "url": safe_url(u or ""), "board": b or "",
-                 "fit": fit_text(score), "fit_score": score, "alerted_at": at}
-                for i, t, c, u, b, label, score, at in rows]
+                 "fit": fit_text(fit), "fit_score": fit, "alerted_at": at}
+                for i, t, c, u, b, label, score, at, model in rows for fit in [fit_of(score, label, model)]]
 
     def hide_from_review(self, job_id: str) -> None:
         with self.store.connect() as conn:
