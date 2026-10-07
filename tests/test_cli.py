@@ -188,6 +188,58 @@ class TestFeedbackCommands(unittest.TestCase):
 
 
 
+class TestFollowUpEmail(unittest.TestCase):
+    EMAIL_SETTINGS = SETTINGS + ("notify:\n  email: {from_env: GMAIL_ADDRESS, password_env: GMAIL_APP_PASSWORD, "
+                                 "to_env: NOTIFY_EMAIL}\n"
+                                 "tracker: {follow_up_email: true, digest_at: \"00:00\"}\n")
+
+    def setUp(self):
+        from datetime import date, timedelta
+        from jobhunter.store import Store
+        from jobhunter.tracker.records import Applications
+        self.tmp = Path(tempfile.mkdtemp())
+        self.path = write_project(self.tmp, self.EMAIL_SETTINGS, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        (self.tmp / ".env").write_text("GMAIL_ADDRESS=sender@example.com\nGMAIL_APP_PASSWORD=app-pass\n"
+                                       "NOTIFY_EMAIL=john.doe@example.com\n")
+        applied = (date.today() - timedelta(days=7)).isoformat()            # its default follow-up is due today
+        Applications(Store(self.tmp / "data" / "jobs.db")).add(title="Engineer", company="Acme", applied_at=applied)
+
+    def recipients(self, smtp):
+        return [c.args[1] for c in smtp.return_value.__enter__.return_value.sendmail.call_args_list]
+
+    def test_send_test_digest_sends_to_the_followup_address(self):
+        from unittest.mock import patch
+        with patch("jobhunter.notify.smtplib.SMTP") as smtp:
+            code, out, _ = cli("--settings", str(self.path), "send-test-digest")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.recipients(smtp), ["john.doe+followup@example.com"])
+        self.assertIn("john.doe+followup@example.com", out)
+
+    def test_send_test_digest_with_nothing_due_sends_nothing(self):
+        from unittest.mock import patch
+        from jobhunter.store import Store
+        from jobhunter.tracker.records import Applications
+        apps = Applications(Store(self.tmp / "data" / "jobs.db"))
+        apps.delete(apps.all()[0]["id"])
+        with patch("jobhunter.notify.smtplib.SMTP") as smtp:
+            code, out, _ = cli("--settings", str(self.path), "send-test-digest")
+        self.assertEqual((code, self.recipients(smtp)), (0, []))
+        self.assertIn("nothing is due today", out)
+
+    def test_a_run_sends_the_follow_up_email_once(self):
+        from unittest.mock import patch
+        with patch("jobhunter.notify.smtplib.SMTP") as smtp, patch("jobhunter.notify.requests.post"):
+            cli("--settings", str(self.path), "run")
+            cli("--settings", str(self.path), "run")
+        self.assertEqual(self.recipients(smtp).count("john.doe+followup@example.com"), 1)
+
+    def test_a_dry_run_never_sends_it(self):
+        from unittest.mock import patch
+        with patch("jobhunter.notify.smtplib.SMTP") as smtp, patch("jobhunter.notify.requests.post"):
+            cli("--settings", str(self.path), "run", "--dry-run")
+        self.assertNotIn("john.doe+followup@example.com", self.recipients(smtp))
+
+
 class TestTrackerCommands(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

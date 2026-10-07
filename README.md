@@ -168,6 +168,7 @@ that also has `generate(prompt) -> str` can write cover letters.
 | `list-boards`, `list-scorers` | Built-in and plugin boards and scorers, and where each comes from |
 | `export-feedback [--out FILE] [--since YYYY-MM-DD]` | Write each job's latest verdict from the alert buttons to a CSV (default `data/feedback_labels.csv`; columns `job_id,job_title,company,decision,verdict,received_at`) |
 | `send-test-alert` | Email yourself an alert for the last notified job, to try the feedback buttons |
+| `send-test-digest` | Email yourself today's follow-up email now, if anything is due |
 | `tracker [--port N] [--no-open]` | Open the application tracker in your browser (this computer only); Ctrl+C stops it |
 | `tracker-import FILE.csv [--dry-run]` | Add applications kept elsewhere, once; columns `company,title,applied_at` (YYYY-MM-DD), optionally `url,stage` |
 
@@ -215,6 +216,10 @@ The page runs only on this computer (`127.0.0.1`, with a key in its address), wo
 `data/jobs.db`. It is not reachable from a phone; the email buttons are the phone path. Options are under `tracker:`
 in [docs/settings.md](docs/settings.md#tracker); applications kept in a spreadsheet can be brought in once with
 `tracker-import`.
+
+With `tracker: {follow_up_email: true}` (and email alerts set up), the first run after 8am on a day a follow-up,
+screen or interview falls due sends one email to your alert address plus `+followup`: what is due today, overdue
+follow-ups and calls this week, each with its job link, people and notes. `send-test-digest` sends today's now.
 
 ## Known limitations
 

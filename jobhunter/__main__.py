@@ -171,6 +171,41 @@ def _send_test_alert(settings: Any, store: Store) -> int:
     return 0
 
 
+def _follow_up_email(settings: Any, store: Store, test: bool = False) -> int:
+    """After a run: today's follow-up email if it is due (tracker.follow_up_email). With test=True (send-test-digest)
+    it is composed and sent now, whatever the time or whether today's has gone, and nothing is recorded."""
+    from jobhunter.notify import send_email
+    from jobhunter.tracker.digest import compose, digest_address, due_items, send_digest
+    from jobhunter.tracker.records import Applications
+    cfg, tracker = settings.notify.email, settings.tracker
+    if test and not cfg:
+        print("jobhunter: send-test-digest needs notify.email in the settings", file=sys.stderr)
+        return 2
+    to = digest_address(cfg, os.environ, tracker.digest_tag) if cfg else ""
+
+    def send(subject: str, plain: str, html_body: str) -> bool:
+        return send_email(cfg, os.environ, subject, plain, html_body, print, to=to, what="follow-up email")
+    if test:
+        from jobhunter.schedule import local_time
+        today = local_time(settings.schedule, utc_now()).date()
+        message = compose(due_items(Applications(store).all(), tracker, today), today)
+        if message is None:
+            print("nothing is due today; no follow-up email to send")
+            return 0
+        if not send(*message):
+            print("jobhunter: the follow-up email could not be sent", file=sys.stderr)
+            return 1
+        print(f"sent today's follow-up email to {to}")
+        return 0
+    try:
+        line = send_digest(settings, store, utc_now(), send)
+        if line:
+            print(line)
+    except Exception as e:                       # the follow-up email never stops a run
+        print(f"follow-up email: failed ({type(e).__name__}: {str(e)[:200]})")
+    return 0
+
+
 def _tracker_import(apps: Applications, path: str, dry_run: bool) -> int:
     from jobhunter.tracker.importing import import_csv
     try:
@@ -205,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     exp.add_argument("--out", help="output file (default: data/feedback_labels.csv next to the settings file)")
     exp.add_argument("--since", help="only verdicts on or after this date (YYYY-MM-DD)")
     sub.add_parser("send-test-alert", help="email yourself an alert for the last notified job, to try the buttons")
+    sub.add_parser("send-test-digest", help="email yourself today's follow-up email now, if anything is due")
     trk = sub.add_parser("tracker", help="open the application tracker in your browser (127.0.0.1 only)")
     trk.add_argument("--port", type=int, default=8765, help="port to try first (default 8765; another when taken)")
     trk.add_argument("--no-open", action="store_true", help="print the address instead of opening the browser")
@@ -227,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name:16} {registry.origins[(kind, name)]}")
         return 0
 
-    if args.command in ("export-feedback", "send-test-alert", "tracker", "tracker-import"):
+    if args.command in ("export-feedback", "send-test-alert", "send-test-digest", "tracker", "tracker-import"):
         try:
             settings = load_settings(settings_path)
         except SettingsError as e:
@@ -242,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "tracker-import":
             return _tracker_import(Applications(store), args.path, args.dry_run)
+        if args.command == "send-test-digest":
+            return _follow_up_email(settings, store, test=True)
         return _send_test_alert(settings, store)
 
     try:
@@ -287,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             print("skipped: another run is in progress")
             return 0
         run(app, store, Notifier(app.settings.notify), only=only, dry_run=False, feedback=feedback)
+        _follow_up_email(app.settings, store)
         write_last_run(last_run_path, started)
     return 0
 
