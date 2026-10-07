@@ -65,7 +65,7 @@ class TestPage(unittest.TestCase):
         self.assertNotIn("numbers <kbd>", self.text)
 
     def test_the_add_box_is_labelled_and_has_an_add_button(self):
-        self.assertIn('<label for="quick"', self.text)
+        self.assertIn('<label for="quick" class="sr-only"', self.text)     # one visible word: the Add button
         self.assertIn("Add application", self.text)
         self.assertIn('id="add-button"', self.text)
         self.assertIn('id="search-open"', self.text)

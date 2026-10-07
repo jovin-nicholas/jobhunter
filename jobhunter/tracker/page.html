@@ -24,7 +24,7 @@ header { position: sticky; top: 0; background: var(--paper); border-bottom: 1px 
 .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .brand { font-weight: 600; letter-spacing: .02em; margin-right: 8px; }
 .add { flex: 1 1 420px; display: flex; gap: 8px; align-items: center; min-width: 0; }
-.add label { font-weight: 600; white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #quick { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--raised); }
 .primary { background: var(--accent); color: var(--paper); border: 0; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-weight: 600; }
 #search { flex: 1 1 200px; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 6px; background: var(--raised); }
@@ -103,8 +103,8 @@ pre.jd { white-space: pre-wrap; font: 13px/1.5 var(--sans); background: var(--pa
   <div class="bar">
     <span class="brand">jobhunter · applications</span>
     <div class="add">
-      <label for="quick">Add application</label>
-      <input id="quick" type="text" autocomplete="off" placeholder="job link, or Company — Title">
+      <label for="quick" class="sr-only">Add application</label>
+      <input id="quick" type="text" autocomplete="off" placeholder="New application: paste a job link, or type Company — Title">
       <button type="button" class="primary" id="add-button">Add</button>
     </div>
     <input id="search" type="search" aria-label="Search applications" placeholder="Search company, title, notes" hidden>
@@ -287,7 +287,7 @@ function renderList() {
            el("tbody", {}, review.map(reviewRow)))
       : el("p", {class: "empty"}, "No recent alerts to review."));
     if (nothing) parts.unshift(el("p", {class: "empty"}, "Mark the alerts you applied to with “applied” below, or add one "
-                                  + "with “Add application” above."));
+                                  + "with the Add box above."));
   }
   return parts;
 }
