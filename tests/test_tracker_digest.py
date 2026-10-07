@@ -77,6 +77,13 @@ class TestDueItems(unittest.TestCase):
             self.assertEqual([(e["id"], e["when"]) for e in items["this_week"]], [(1, "tomorrow")])
             self.assertEqual(due_items([same_day], TrackerSettings(), date(2026, 10, 8))["today"], [])
 
+    def test_an_offer_gives_nothing_even_with_a_call_scheduled_today(self):
+        offer = app(1, "offer", follow_up="2026-10-07",
+                    events=[("interview", "2026-10-07", "2026-10-02"), ("offer", "2026-10-06", "2026-10-06")])
+        items = due_items([offer], TrackerSettings(), TODAY)
+        self.assertEqual((items["today"], items["overdue"], items["this_week"]), ([], [], []))
+        self.assertIsNone(compose(items, TODAY))
+
     def test_one_day_late_and_tomorrow_read_naturally(self):
         items = due_items([app(1, follow_up="2026-10-06"),
                            app(2, "screen", events=[("screen", "2026-10-08", "2026-10-01")])], TrackerSettings(), TODAY)

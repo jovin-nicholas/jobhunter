@@ -38,7 +38,7 @@ def due_items(apps: list[dict], settings: TrackerSettings, today: date) -> dict:
                 "url": safe_url(app.get("url") or ""), "stage": app["stage"], "people": app.get("people") or "",
                 "notes": app.get("notes") or "", "reason": reason, "when": when, "sort": sort}
     for app in apps:
-        if app["stage"] in CLOSED_STAGES:
+        if app["stage"] in CLOSED_STAGES or app["stage"] == "offer":     # offers are never in the email
             continue
         follow_up = follow_up_due(app, today, settings)
         if follow_up == iso:
