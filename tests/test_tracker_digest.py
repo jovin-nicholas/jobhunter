@@ -1,8 +1,12 @@
+import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
+from pathlib import Path
 
-from jobhunter.settings import TrackerSettings
-from jobhunter.tracker.digest import compose, due_items
+from jobhunter.settings import NotifySettings, ScheduleSettings, TrackerSettings
+from jobhunter.store import Store
+from jobhunter.tracker.digest import STATE_FILE, compose, digest_address, due_items, send_digest
+from jobhunter.tracker.records import Applications
 
 TODAY = date(2026, 10, 7)
 
@@ -98,3 +102,67 @@ class TestCompose(unittest.TestCase):
         _, plain, html = compose(self.items(due_app, quiet_app, settings=TrackerSettings(ghost_after_days=21)), TODAY)
         self.assertIn("quiet for 21+ days", plain)
         self.assertIn("quiet for 21+ days", html)
+
+
+EMAIL = {"from_env": "GMAIL_ADDRESS", "password_env": "GMAIL_APP_PASSWORD"}
+
+
+class FakeSettings:
+    def __init__(self, folder, on=True, at="08:00", tz="America/New_York"):
+        self.tracker = TrackerSettings(follow_up_email=on, digest_at=at)
+        self.notify = NotifySettings(email=dict(EMAIL))
+        self.schedule = ScheduleSettings(timezone=tz)
+        self.data_dir = Path(folder)
+
+
+class TestSendDigest(unittest.TestCase):
+    def setUp(self):
+        self.folder = Path(tempfile.mkdtemp())
+        self.store = Store(self.folder / "jobs.db")
+        Applications(self.store).add(title="Engineer", company="Acme", applied_at="2026-09-30")   # due 2026-10-07
+        self.sent = []
+
+    def send(self, ok=True):
+        def sender(subject, plain, html):
+            self.sent.append(subject)
+            return ok
+        return sender
+
+    def at(self, local):          # a New York wall-clock time on 2026-10-07 (UTC-4)
+        hour, minute = map(int, local.split(":"))
+        return datetime(2026, 10, 7, hour + 4, minute, tzinfo=timezone.utc) if hour < 20 else \
+            datetime(2026, 10, 8, hour + 4 - 24, minute, tzinfo=timezone.utc)
+
+    def test_not_before_digest_at_then_once_that_day(self):
+        s = FakeSettings(self.folder)
+        self.assertIsNone(send_digest(s, self.store, self.at("07:59"), self.send()))
+        self.assertIn("sent", send_digest(s, self.store, self.at("08:05"), self.send()))
+        self.assertIsNone(send_digest(s, self.store, self.at("09:00"), self.send()))
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual((self.folder / STATE_FILE).read_text().strip(), "2026-10-07")
+
+    def test_the_local_date_decides_late_in_the_evening(self):
+        s = FakeSettings(self.folder)
+        send_digest(s, self.store, self.at("08:05"), self.send())
+        self.assertIsNone(send_digest(s, self.store, self.at("23:30"), self.send()))   # 03:30 UTC on the 8th
+        self.assertEqual(len(self.sent), 1)
+
+    def test_off_or_nothing_due_sends_nothing(self):
+        self.assertIsNone(send_digest(FakeSettings(self.folder, on=False), self.store, self.at("09:00"), self.send()))
+        empty = Path(tempfile.mkdtemp())
+        self.assertIsNone(send_digest(FakeSettings(empty), Store(empty / "jobs.db"), self.at("09:00"), self.send()))
+        self.assertEqual((empty / STATE_FILE).read_text().strip(), "2026-10-07")     # recorded: not recomputed
+        self.assertEqual(self.sent, [])
+
+    def test_a_failed_send_is_retried_once_then_stops_for_the_day(self):
+        s = FakeSettings(self.folder)
+        self.assertIn("tried again", send_digest(s, self.store, self.at("08:05"), self.send(ok=False)))
+        self.assertIn("not tried again today", send_digest(s, self.store, self.at("09:05"), self.send(ok=False)))
+        self.assertIsNone(send_digest(s, self.store, self.at("10:05"), self.send(ok=False)))
+        self.assertEqual(len(self.sent), 2)
+
+    def test_the_address_adds_the_tag_to_the_alerts_recipient(self):
+        env = {"GMAIL_ADDRESS": "sender@example.com", "NOTIFY_EMAIL": "john.doe@example.com"}
+        self.assertEqual(digest_address(EMAIL, env, "followup"), "sender+followup@example.com")
+        self.assertEqual(digest_address({**EMAIL, "to_env": "NOTIFY_EMAIL"}, env, "followup"),
+                         "john.doe+followup@example.com")

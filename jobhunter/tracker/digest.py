@@ -3,11 +3,15 @@ overdue follow-ups and calls this week, with each job's link, people and notes. 
 from __future__ import annotations
 
 import html as html_lib
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from typing import Any, Callable, Mapping
 
+from jobhunter.feedback import plus_address
+from jobhunter.notify import email_addresses
+from jobhunter.schedule import local_time
 from jobhunter.settings import TrackerSettings
 from jobhunter.tracker import CLOSED_STAGES
-from jobhunter.tracker.records import safe_url
+from jobhunter.tracker.records import Applications, safe_url
 from jobhunter.tracker.state import follow_up_due, last_activity
 
 CALL_DAYS = 7                     # "calls this week": screens and interviews in the next 7 days after today
@@ -108,3 +112,55 @@ def compose(items: dict, today: date) -> tuple[str, str, str] | None:
     page = ('<div style="font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1c1b19">' + "".join(body)
             + f'<p style="color:#555;margin-top:18px">{html_lib.escape(footer)}</p></div>')
     return _subject(items), text, page
+
+
+STATE_FILE = "tracker_digest"     # in data/: "2026-10-07" (done for that day) or "2026-10-07 failed 1"
+MAX_FAILURES = 2
+
+
+def digest_address(cfg: dict, env: Mapping[str, str], tag: str) -> str:
+    """Where the follow-up email goes: the alerts' recipient with +tag (an existing +tag is replaced)."""
+    return plus_address(email_addresses(cfg, env)[1], tag)
+
+
+def _read_state(path: Any) -> tuple[str, int]:
+    try:
+        parts = path.read_text(encoding="utf-8").split()
+    except OSError:
+        return "", 0
+    if not parts:
+        return "", 0
+    failures = int(parts[2]) if len(parts) == 3 and parts[1] == "failed" and parts[2].isdigit() else 0
+    return parts[0], failures
+
+
+def _write_state(path: Any, day: str, failures: int = 0) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(day + (f" failed {failures}" if failures else "") + "\n", encoding="utf-8")
+
+
+def send_digest(settings: Any, store: Any, now: datetime, send: Callable[[str, str, str], bool]) -> str | None:
+    """Send today's follow-up email if it is on, it is digest_at or later locally, today's has not gone yet and
+    something falls due today. Returns a line for the run log, or None when there is nothing to say."""
+    tracker = settings.tracker
+    if not tracker.follow_up_email or not settings.notify.email:
+        return None
+    local = local_time(settings.schedule, now)
+    if local.strftime("%H:%M") < tracker.digest_at:
+        return None
+    day, path = local.date().isoformat(), settings.data_dir / STATE_FILE
+    last, failures = _read_state(path)
+    if last == day and (failures == 0 or failures >= MAX_FAILURES):
+        return None
+    message = compose(due_items(Applications(store).all(), tracker, local.date()), local.date())
+    if message is None:
+        _write_state(path, day)
+        return None
+    if send(*message):
+        _write_state(path, day)
+        return "follow-up email: sent"
+    failures = failures + 1 if last == day else 1
+    _write_state(path, day, failures)
+    if failures >= MAX_FAILURES:
+        return "follow-up email: not sent again; not tried again today"
+    return "follow-up email: not sent; tried again on the next run"
