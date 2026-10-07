@@ -1,8 +1,11 @@
+import os
+import time
 import unittest
+from contextlib import contextmanager
 from datetime import date
 
 from jobhunter.settings import TrackerSettings
-from jobhunter.tracker.state import attention, build_state, follow_up_for
+from jobhunter.tracker.state import attention, build_state, follow_up_for, scheduled_ahead
 
 TODAY = date(2026, 10, 6)
 S = TrackerSettings()
@@ -17,6 +20,45 @@ def app(i, stage="applied", applied="2026-10-01", follow_up=None, events=(), fol
     return {"id": i, "company": f"Co{i}", "title": "Engineer", "stage": stage, "stage_at": evs[-1]["at"],
             "applied_at": applied, "follow_up_at": follow_up, "board": "dice", "resume_id": "", "fit_score": None,
             "events": evs}
+
+
+@contextmanager
+def local_zone(name):
+    """Run with the computer's zone set to `name`, so tests don't depend on the machine's zone."""
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+
+
+class TestScheduledAhead(unittest.TestCase):
+    def call(self, at, created_at):
+        return {"kind": "stage", "value": "interview", "at": at, "created_at": created_at}
+
+    def test_an_evening_entry_for_tomorrow_counts_by_the_local_date(self):
+        evening = self.call("2026-10-08", "2026-10-08T00:30:00+00:00")         # 20:30 EDT on the 7th
+        interview = app(1, "interview")
+        interview["events"].append(evening)
+        with local_zone("America/New_York"):
+            self.assertTrue(scheduled_ahead(evening))
+            self.assertEqual(attention(interview, date(2026, 10, 7), S), (1, "interview", "2026-10-08"))
+
+    def test_one_logged_the_same_local_day_does_not_count(self):
+        with local_zone("America/New_York"):
+            self.assertFalse(scheduled_ahead(self.call("2026-10-08", "2026-10-08T14:00:00+00:00")))
+            self.assertFalse(scheduled_ahead(self.call("2026-10-08", "2026-10-09T02:00:00+00:00")))  # 22:00 on the 8th
+
+    def test_a_missing_or_garbled_created_at_is_not_ahead(self):
+        self.assertFalse(scheduled_ahead({"at": "2026-10-08"}))
+        self.assertFalse(scheduled_ahead(self.call("2026-10-08", "")))
+        self.assertFalse(scheduled_ahead(self.call("2026-10-08", "garbled")))
 
 
 class TestAttention(unittest.TestCase):

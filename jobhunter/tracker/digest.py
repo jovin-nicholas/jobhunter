@@ -12,7 +12,7 @@ from jobhunter.schedule import local_time
 from jobhunter.settings import TrackerSettings
 from jobhunter.tracker import CLOSED_STAGES
 from jobhunter.tracker.records import Applications, safe_url
-from jobhunter.tracker.state import follow_up_due, last_activity
+from jobhunter.tracker.state import follow_up_due, last_activity, scheduled_ahead
 
 CALL_DAYS = 7                     # "calls this week": screens and interviews in the next 7 days after today
 CALLS = ("screen", "interview")
@@ -22,7 +22,7 @@ GROUPS = (("today", "Due today"), ("overdue", "Overdue"), ("this_week", "Calls t
 def _scheduled_calls(app: dict) -> list[tuple[str, str]]:
     """(date, stage) of each screen or interview entered ahead of its date; one logged on its own day has happened."""
     return [(e["at"], e["value"]) for e in app["events"] if e["kind"] == "stage" and e["value"] in CALLS
-            and e["at"] > (e.get("created_at") or "")[:10]]
+            and scheduled_ahead(e)]
 
 
 def _on(day: date, today: date) -> str:

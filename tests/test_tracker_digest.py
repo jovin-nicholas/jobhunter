@@ -1,5 +1,8 @@
+import os
 import tempfile
+import time
 import unittest
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -19,6 +22,22 @@ def app(i, stage="applied", applied="2026-10-01", follow_up=None, events=(), peo
         evs.append({"kind": "follow_up_set", "value": follow_up, "at": applied, "created_at": applied})
     return {"id": i, "company": f"Co{i}", "title": "Engineer", "url": url, "stage": stage, "stage_at": evs[-1]["at"],
             "applied_at": applied, "follow_up_at": follow_up, "people": people, "notes": notes, "events": evs}
+
+
+@contextmanager
+def local_zone(name):
+    """Run with the computer's zone set to `name`, so tests don't depend on the machine's zone."""
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
 
 
 class TestDueItems(unittest.TestCase):
@@ -45,6 +64,18 @@ class TestDueItems(unittest.TestCase):
     def test_a_call_logged_for_today_on_today_is_not_scheduled_ahead(self):
         items = due_items([app(1, "screen", events=[("screen", "2026-10-07", "2026-10-07")])], TrackerSettings(), TODAY)
         self.assertEqual(items["today"], [])
+
+    def test_a_call_entered_in_the_evening_for_tomorrow_is_scheduled_ahead(self):
+        evening = app(1, "interview")
+        evening["events"].append({"kind": "stage", "value": "interview", "at": "2026-10-08",
+                                  "created_at": "2026-10-08T00:30:00+00:00"})     # 20:30 EDT on the 7th
+        same_day = app(2, "interview")
+        same_day["events"].append({"kind": "stage", "value": "interview", "at": "2026-10-08",
+                                   "created_at": "2026-10-08T13:00:00+00:00"})    # 09:00 EDT on the 8th
+        with local_zone("America/New_York"):
+            items = due_items([evening, same_day], TrackerSettings(), TODAY)
+            self.assertEqual([(e["id"], e["when"]) for e in items["this_week"]], [(1, "tomorrow")])
+            self.assertEqual(due_items([same_day], TrackerSettings(), date(2026, 10, 8))["today"], [])
 
     def test_one_day_late_and_tomorrow_read_naturally(self):
         items = due_items([app(1, follow_up="2026-10-06"),

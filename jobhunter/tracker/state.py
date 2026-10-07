@@ -3,7 +3,7 @@ numbers. Pure: the server passes today's date in, so tests pin it."""
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from jobhunter.settings import TrackerSettings
 from jobhunter.tracker import CLOSED_STAGES, OPEN_STAGES, STAGES
@@ -14,6 +14,17 @@ SOON_DAYS = 3          # a screen or interview dated this soon puts the applicat
 
 def last_activity(app: dict) -> date:
     return max([date.fromisoformat(e["at"]) for e in app["events"]] or [date.fromisoformat(app["applied_at"])])
+
+
+def scheduled_ahead(event: dict) -> bool:
+    """True when a screen or interview was entered before its date: one logged on its own day has already happened.
+    `at` is a local date and `created_at` a UTC time, so the entry's local date is compared; a missing or garbled
+    created_at counts as not ahead."""
+    try:
+        made = datetime.fromisoformat(event["created_at"]).astimezone().date()
+    except (KeyError, TypeError, ValueError):
+        return False
+    return event["at"] > made.isoformat()
 
 
 def follow_up_due(app: dict, today: date, settings: TrackerSettings) -> str | None:
@@ -38,10 +49,8 @@ def attention(app: dict, today: date, settings: TrackerSettings) -> tuple[int, s
     if app["stage"] == "offer":
         return 0, "offer", None
     soon = today + timedelta(days=SOON_DAYS)
-    # Only a screen or interview scheduled ahead (dated after the day it was entered) is upcoming: one logged today
-    # for today has already happened.
     upcoming = sorted((e["at"], e["value"]) for e in app["events"] if e["kind"] == "stage"
-                      and e["value"] in ("screen", "interview") and e["at"] > (e.get("created_at") or "")[:10]
+                      and e["value"] in ("screen", "interview") and scheduled_ahead(e)
                       and today <= date.fromisoformat(e["at"]) <= soon)
     if upcoming:
         at, value = upcoming[0]
