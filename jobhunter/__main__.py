@@ -1,5 +1,5 @@
 """Command line: python -m jobhunter [--settings PATH] run | check-config | list-boards | list-scorers |
-export-feedback | send-test-alert | tracker | tracker-import"""
+export-feedback | send-test-alert | tracker | tracker-import | tracker-calibrate"""
 from __future__ import annotations
 
 import argparse
@@ -208,6 +208,30 @@ def _follow_up_email(settings: Any, store: Store, test: bool = False) -> int:
     return 0
 
 
+def _calibrate(settings: Any) -> int:
+    """Fixed fit-scale bounds per Laya checkpoint from jobs.db: the 1st and 99th percentile of its real fits."""
+    from jobhunter.fit_scale import MIN_FITS, calibrate, save_scales
+    db = settings.data_dir / "jobs.db"
+    bounds = calibrate(db) if db.exists() else {}
+    if not bounds:
+        print(f"no Laya model has {MIN_FITS} or more fit scores yet; nothing changed (fits show as raw scores)")
+        return 0
+    path = save_scales(settings.data_dir, bounds)
+    for model, b in bounds.items():
+        print(f"{model}: raw {b['low']:.2f} -> 0, raw {b['high']:.2f} -> 10 ({b['n']} fits)")
+    print(f"saved {path}; run it again after changing checkpoints")
+    return 0
+
+
+def _fit_scale_notes(settings: Any) -> list[str]:
+    """check-config notes: a configured Laya checkpoint that tracker-calibrate has not set a fit scale for yet."""
+    from jobhunter.fit_scale import MIN_FITS, load_scales
+    scales = load_scales(settings.data_dir)
+    models = sorted({f"laya:{s.options['model']}" for s in settings.scorers if s.name == "laya"})
+    return [f"fits from {model} show as raw scores until `tracker-calibrate` has run (after {MIN_FITS} or more "
+            "scored jobs)" for model in models if model not in scales]
+
+
 def _tracker_import(apps: Applications, path: str, dry_run: bool) -> int:
     from jobhunter.tracker.importing import import_csv
     try:
@@ -249,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     tim = sub.add_parser("tracker-import", help="add applications kept elsewhere from a CSV, once")
     tim.add_argument("path", help="CSV with columns company, title, applied_at (YYYY-MM-DD), and optionally url, stage")
     tim.add_argument("--dry-run", action="store_true", help="report what would be added, write nothing")
+    sub.add_parser("tracker-calibrate", help="set the 0-10 fit scale for each Laya checkpoint from its scores so far")
     args = parser.parse_args(argv)
 
     settings_path = Path(args.settings).expanduser().resolve()
@@ -265,11 +290,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name:16} {registry.origins[(kind, name)]}")
         return 0
 
-    if args.command in ("export-feedback", "send-test-alert", "send-test-digest", "tracker", "tracker-import"):
+    if args.command in ("export-feedback", "send-test-alert", "send-test-digest", "tracker", "tracker-import",
+                        "tracker-calibrate"):
         try:
             settings = load_settings(settings_path)
         except SettingsError as e:
             return _print_problems(e.problems)
+        if args.command == "tracker-calibrate":
+            return _calibrate(settings)
         store = Store(settings.data_dir / "jobs.db")
         if args.command == "export-feedback":
             return _export_feedback(store, args.out or settings.data_dir / "feedback_labels.csv", args.since)
@@ -297,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             line = scorer.describe() if callable(getattr(scorer, "describe", None)) else None
             if line:
                 print(line)
-        for note in settings_notes(app.settings) + model_notes(app):
+        for note in settings_notes(app.settings) + model_notes(app) + _fit_scale_notes(app.settings):
             print(f"note: {note}")
         if not app.resumes.names:
             print("note: no name found on the default resume's first line, so none is removed before models see "

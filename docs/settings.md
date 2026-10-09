@@ -173,6 +173,13 @@ Settings for `jobhunter tracker`, the application tracker. All optional.
 | `digest_at` | `"08:00"` | Local time from which that day's email is sent, by the first run at or after it: a run must happen at or after this time, so with `schedule.every: 24h` start the scheduler (or set the cron time) after it. "Today" for the email uses `schedule.timezone`, while the tracker page uses the computer's zone; leave `timezone` unset or set it to the computer's zone to keep them in step |
 | `digest_tag` | `followup` | Plus tag on the recipient (`you+followup@gmail.com`), for a Gmail filter; must differ from `alert_tag` and `feedback_tag` |
 
+**Fit scale.** A Laya checkpoint's fit score is shown on the tracker page, in alerts and in the follow-up email
+scaled to 0-10, between that checkpoint's 1st and 99th percentile of its real fits so far. The bounds live in
+`data/fit_scale.json`, one entry per checkpoint, written by `tracker-calibrate` (needs 30 or more scored jobs from
+that checkpoint); until then, or for a checkpoint with no bounds yet, its fits show as raw scores. Alert and save
+cut-offs always compare against the raw score, never the scaled one. Run `tracker-calibrate` again after changing
+checkpoints, since the bounds are specific to one checkpoint's scores.
+
 ## notify
 
 Off unless set. A failed channel is logged and never stops a run. When no channel delivers an alert, the job is

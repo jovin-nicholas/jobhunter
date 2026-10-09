@@ -272,5 +272,42 @@ class TestTrackerCommands(unittest.TestCase):
         browser.assert_called_once()
 
 
+class TestTrackerCalibrate(unittest.TestCase):
+    def test_calibrate_writes_bounds_and_reports_them(self):
+        import json
+        from jobhunter.models import Job, ScoreResult
+        from jobhunter.store import Store
+        tmp = Path(tempfile.mkdtemp())
+        path = write_project(tmp, SETTINGS, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        store = Store(tmp / "data" / "jobs.db")
+        for i in range(40):
+            s = 3.0 + i * 0.1
+            store.save(Job(f"dice_{i}", "Engineer", "Acme", "Remote", f"https://e.example/{i}"), "logged",
+                       ScoreResult(score=s, model="laya:~/models/questions", label=f"fit {s:.2f}/10"))
+        code, out, _ = cli("--settings", str(path), "tracker-calibrate")
+        self.assertEqual(code, 0, out)
+        saved = json.loads((tmp / "data" / "fit_scale.json").read_text())
+        self.assertEqual(list(saved), ["laya:~/models/questions"])
+        self.assertIn("laya:~/models/questions", out)
+        self.assertIn("40 fits", out)
+
+    def test_calibrate_with_too_few_fits_says_so_and_writes_nothing(self):
+        tmp = Path(tempfile.mkdtemp())
+        path = write_project(tmp, SETTINGS, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        code, out, _ = cli("--settings", str(path), "tracker-calibrate")
+        self.assertEqual(code, 0)
+        self.assertIn("no Laya model has 30", out)
+        self.assertFalse((tmp / "data" / "fit_scale.json").exists())
+
+    def test_check_config_notes_a_laya_checkpoint_without_a_fit_scale(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = SETTINGS.replace("  - fixed: {}\n", "  - laya: {model: convaiinnovations/laya}\n")
+        path = write_project(tmp, settings, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        code, out, _ = cli("--settings", str(path), "check-config")
+        self.assertEqual(code, 0, out)
+        self.assertIn("note: fits from laya:convaiinnovations/laya show as raw scores until "
+                      "`tracker-calibrate` has run (after 30 or more scored jobs)", out)
+
+
 if __name__ == "__main__":
     unittest.main()

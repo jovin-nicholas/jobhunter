@@ -171,6 +171,7 @@ that also has `generate(prompt) -> str` can write cover letters.
 | `send-test-digest` | Email yourself today's follow-up email now, if anything is due |
 | `tracker [--port N] [--no-open]` | Open the application tracker in your browser (this computer only); Ctrl+C stops it |
 | `tracker-import FILE.csv [--dry-run]` | Add applications kept elsewhere, once; columns `company,title,applied_at` (YYYY-MM-DD), optionally `url,stage` |
+| `tracker-calibrate` | Set the 0-10 fit scale for each Laya checkpoint from its scores so far (run again after changing checkpoints) |
 
 Each job is saved in `data/jobs.db` with a status: `notified`, `logged` or `skipped` (the score against `decisions`),
 `filtered` (with the filter's reason), `stale` or `gone` (a discovered posting too old, or no longer there), `duplicate`
@@ -216,6 +217,9 @@ The page runs only on this computer (`127.0.0.1`, with a key in its address), wo
 `data/jobs.db`. It is not reachable from a phone; the email buttons are the phone path. Options are under `tracker:`
 in [docs/settings.md](docs/settings.md#tracker); applications kept in a spreadsheet can be brought in once with
 `tracker-import`.
+
+A Laya checkpoint's fit is an average that rarely goes above 7, so it is shown scaled to 0-10 between that
+checkpoint's 1st and 99th percentile (`tracker-calibrate` sets them; raw scores stay in jobs.db and in a tooltip).
 
 With `tracker: {follow_up_email: true}` (and email alerts set up), the first run after 8am once a follow-up,
 screen or interview has fallen due (since the last such email, so one due on a quiet weekend isn't lost) sends one
