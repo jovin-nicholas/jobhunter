@@ -8,7 +8,7 @@ import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 import requests
 
@@ -54,7 +54,8 @@ def _slack_link(url) -> str:
     return f"<{slack_escape(str(url).replace('|', '%7C').replace('>', '%3E')).replace('&lt;', '%3C')}|Open job>"
 
 
-def _summary(job: Job, result: ScoreResult, resume_id: str, for_email: bool = False) -> str:
+def _summary(job: Job, result: ScoreResult, resume_id: str, for_email: bool = False,
+             scales: Mapping[str, Any] | None = None) -> str:
     """The alert text. Slack keeps the model and the cut-offs, with every field escaped for Slack; the email leaves
     both out."""
     e = (lambda s: str(s)) if for_email else slack_escape
@@ -64,7 +65,7 @@ def _summary(job: Job, result: ScoreResult, resume_id: str, for_email: bool = Fa
     return (f"{e(job.title)} at {e(job.company)}\n"
             f"Location: {e(job.location)}\n"
             f"Link: {link}\n\n"
-            f"Score: {e(score_label(result))}{model}\n"
+            f"Score: {e(score_label(result, scales))}{model}\n"
             f"Resume: {e(resume_id)}\n"
             f"Why: {why}\n"
             f"Matched skills: {e(', '.join(result.matched_skills) or 'none')}\n"
@@ -86,7 +87,7 @@ _BTN = ("display:inline-block;padding:8px 12px;margin:0 6px 6px 0;border-radius:
 
 
 def _html(job: Job, result: ScoreResult, resume_id: str, links: list[tuple[str, str]],
-          cover_letter: str | None) -> str:
+          cover_letter: str | None, scales: Mapping[str, Any] | None = None) -> str:
     """Tables and inline styles only (what mail clients render); every job field is escaped, so a posting cannot
     inject links or buttons of its own."""
     e = lambda s: html.escape(str(s or ""), quote=True)   # noqa: E731
@@ -105,7 +106,7 @@ def _html(job: Job, result: ScoreResult, resume_id: str, links: list[tuple[str, 
         f'<tr><td><h2 style="font-size:18px;margin:0 0 4px">{e(job.title)}</h2>'
         f'<div style="color:#555;font-size:13px">{meta}</div>'
         f'{open_job}'
-        f'<p style="font-size:14px;line-height:1.5">Score {e(score_label(result))} · '
+        f'<p style="font-size:14px;line-height:1.5">Score {e(score_label(result, scales))} · '
         f'resume: {e(resume_id)}<br>Why: {e(_for_reader(result.reasoning))}<br>'
         f'Matched: {e(", ".join(result.matched_skills) or "none")}<br>'
         f'Gaps: {e(", ".join(result.keyword_gaps) or "none")}</p>'
@@ -138,14 +139,15 @@ def send_email(cfg: dict, env: Mapping[str, str], subject: str, plain: str, html
 
 class Notifier:
     def __init__(self, settings: NotifySettings, env: Mapping[str, str] | None = None,
-                 log: Callable[[str], None] = print):
+                 log: Callable[[str], None] = print, scales: Mapping[str, Any] | None = None):
         self.settings = settings
         self.env = os.environ if env is None else env
         self.log = log
+        self.scales = scales
 
     def send(self, job: Job, result: ScoreResult, resume_id: str, cover_letter: str | None = None) -> bool:
         """True when at least one channel delivered the alert, or none is set up."""
-        body = _summary(job, result, resume_id)
+        body = _summary(job, result, resume_id, scales=self.scales)
         if cover_letter:
             body += f"\n\nCover letter draft:\n{slack_escape(cover_letter)}"
         delivered = []
@@ -158,7 +160,8 @@ class Notifier:
     def _slack(self, job: Job, result: ScoreResult, body: str) -> bool:
         url = self.env.get(self.settings.slack["webhook_env"], "")
         try:
-            requests.post(url, json={"text": f":dart: *New match, {slack_escape(score_label(result))}*\n{body}"},
+            requests.post(url, json={"text": f":dart: *New match, {slack_escape(score_label(result, self.scales))}*"
+                                              f"\n{body}"},
                           timeout=10).raise_for_status()
         except Exception as e:
             self.log(f"Slack send failed [{_one_line(job.title)}]: {_failure(e)}")
@@ -169,10 +172,13 @@ class Notifier:
         cfg = self.settings.email
         _, _, feedback_to = email_addresses(cfg, self.env)
         links = [(label, mailto(feedback_to, verdict, job)) for verdict, label in BUTTONS]
-        plain = (_summary(job, result, resume_id, for_email=True) + "\n\nWorth it? Tap one, then send the email it opens:\n"
+        plain = (_summary(job, result, resume_id, for_email=True, scales=self.scales)
+                 + "\n\nWorth it? Tap one, then send the email it opens:\n"
                  + "\n".join(f"{label}: {href}" for label, href in links))
         if cover_letter:
             plain += f"\n\nCover letter draft:\n{cover_letter}"
-        subject = f"[{score_label(result)}] {_one_line(job.title)} at {_one_line(job.company)} ({job.source})"
-        return send_email(cfg, self.env, subject, plain, _html(job, result, resume_id, links, cover_letter), self.log,
+        subject = (f"[{score_label(result, self.scales)}] {_one_line(job.title)} at {_one_line(job.company)} "
+                   f"({job.source})")
+        return send_email(cfg, self.env, subject, plain,
+                          _html(job, result, resume_id, links, cover_letter, scales=self.scales), self.log,
                           what=_one_line(job.title))

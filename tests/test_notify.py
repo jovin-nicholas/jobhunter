@@ -233,5 +233,31 @@ class TestSendEmail(unittest.TestCase):
         self.assertIn("follow-up email", logs[0])
         self.assertNotIn("app-pass", logs[0])
 
+class TestScaledFit(unittest.TestCase):
+    MODEL = "laya:~/models/questions"
+
+    def test_score_label_scales_an_expected_fit_and_keeps_raw(self):
+        from jobhunter.fit_scale import FitScale
+        from jobhunter.models import score_label
+        scales = {self.MODEL: FitScale(3.0, 7.0)}
+        result = ScoreResult(score=6.5, model=self.MODEL, label="fit 6.50/10")
+        self.assertEqual(score_label(result, scales), "fit 8.8/10 (raw 6.50)")
+        self.assertEqual(score_label(result), "fit 6.50/10")                                   # no scales: unchanged
+        other = ScoreResult(score=6.5, model="laya:~/models/other", label="fit 6.50/10")
+        self.assertEqual(score_label(other, scales), "fit 6.50/10")                            # not calibrated
+        prob = ScoreResult(score=None, probability=0.72, model=self.MODEL, label="fit 72%")
+        self.assertEqual(score_label(prob, scales), "fit 72%")                                 # probability label
+
+    def test_the_alert_email_subject_shows_the_scaled_fit(self):
+        from jobhunter.fit_scale import FitScale
+        smtp = MagicMock()
+        result = ScoreResult(score=6.5, model=self.MODEL, decision="notify", label="fit 6.50/10")
+        with patch("jobhunter.notify.requests.post", return_value=FakeResponse()), \
+             patch("jobhunter.notify.smtplib.SMTP", return_value=smtp):
+            Notifier(BOTH, ENV, scales={self.MODEL: FitScale(3.0, 7.0)}).send(JOB, result, "backend.txt")
+        raw = smtp.__enter__.return_value.sendmail.call_args.args[2]
+        self.assertIn("[fit 8.8/10 (raw 6.50)]", email.message_from_string(raw)["Subject"])
+
+
 if __name__ == "__main__":
     unittest.main()

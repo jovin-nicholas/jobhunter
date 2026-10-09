@@ -15,6 +15,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from jobhunter.errors import SettingsError
+from jobhunter.fit_scale import load_scales
 from jobhunter.http import Http
 from jobhunter.inbox import read_feedback
 from jobhunter.notify import Notifier
@@ -163,7 +164,8 @@ def _send_test_alert(settings: Any, store: Store) -> int:
         print("jobhunter: no notified job yet; run jobhunter until one alert has been sent", file=sys.stderr)
         return 2
     job, result, resume_id = last
-    sent = Notifier(NotifySettings(email=settings.notify.email)).send(job, result, resume_id)
+    sent = Notifier(NotifySettings(email=settings.notify.email),
+                    scales=load_scales(settings.data_dir)).send(job, result, resume_id)
     if not sent:
         print("jobhunter: the test alert could not be sent", file=sys.stderr)
         return 1
@@ -318,13 +320,15 @@ def main(argv: list[str] | None = None) -> int:
     store = Store(app.settings.data_dir / "jobs.db")
     feedback = (lambda: read_feedback(app.settings.notify, os.environ, store)) if app.settings.notify.email else None
     if args.dry_run:
-        run(app, store, Notifier(app.settings.notify), only=only, dry_run=True, feedback=feedback)
+        run(app, store, Notifier(app.settings.notify, scales=load_scales(app.settings.data_dir)), only=only,
+            dry_run=True, feedback=feedback)
         return 0
     with run_lock(app.settings.data_dir / "run.lock") as locked:
         if not locked:
             print("skipped: another run is in progress")
             return 0
-        run(app, store, Notifier(app.settings.notify), only=only, dry_run=False, feedback=feedback)
+        run(app, store, Notifier(app.settings.notify, scales=load_scales(app.settings.data_dir)), only=only,
+            dry_run=False, feedback=feedback)
         _follow_up_email(app.settings, store)
         write_last_run(last_run_path, started)
     return 0

@@ -14,6 +14,7 @@ from jobhunter.boards.common import posted_iso
 from jobhunter.discovery import ATS_BOARDS, Discovery
 from jobhunter.errors import BoardSkipped, SettingsError
 from jobhunter.filters import Filter, build_filters
+from jobhunter.fit_scale import load_scales
 from jobhunter.http import Http
 from jobhunter.models import Job, SearchContext, score_label
 from jobhunter.text_clean import repair_text
@@ -144,6 +145,7 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
         except Exception as e:
             log(f"feedback: could not read the inbox ({type(e).__name__})")
     s = app.settings.search
+    scales = load_scales(app.settings.data_dir)
     http = http or Http()
     boards = {name: b for name, b in app.boards.items() if only is None or name in only}
     ctx = SearchContext(s.queries, s.locations, s.max_age_hours, http, log,
@@ -180,7 +182,8 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
     for job in new_jobs:
         counts = summary[job.source]
         try:
-            _process(app, job, boards[job.source], ctx, store, notifier, counts, dry_run, log, fetch_page, notified)
+            _process(app, job, boards[job.source], ctx, store, notifier, counts, dry_run, log, fetch_page, notified,
+                     scales=scales)
         except Exception as e:
             counts.errors += 1
             # Tried again when a board lists it again, for RETRY_HOURS from when it was first saved; then final.
@@ -278,7 +281,7 @@ def _clean(job: Job) -> None:
 
 def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, notifier: Any, counts: BoardSummary,
              dry_run: bool, log: Log, fetch_page: Callable[[str], str] | None,
-             notified: set[tuple[str, str]] | None = None) -> None:
+             notified: set[tuple[str, str]] | None = None, scales: Mapping[str, Any] | None = None) -> None:
     if hasattr(board, "enrich"):
         try:
             job = board.enrich(job, ctx)
@@ -383,7 +386,7 @@ def _process(app: App, job: Job, board: Any, ctx: SearchContext, store: Any, not
             return
         notified.add(key)
     setattr(counts, status, getattr(counts, status) + 1)
-    log(f"{status.upper()} [{job.source}] {job.title} at {job.company}: {score_label(outcome.result)} "
+    log(f"{status.upper()} [{job.source}] {job.title} at {job.company}: {score_label(outcome.result, scales)} "
         f"({outcome.result.model}, resume {resume.id})")
     if dry_run:
         return

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 import sys
@@ -72,6 +73,15 @@ class Fixed:
             raise RateLimited("429")
         value = 9 if job.title.startswith("Great") else 6 if job.title.startswith("Maybe") else 3
         return ScoreResult(score=value, model="fixed", reasoning=f"resume {resume.id}")
+
+
+@scorer("laya_fixed")
+class LayaFixed:
+    def __init__(self, options):
+        pass
+
+    def score(self, job, resume):
+        return ScoreResult(score=6.5, model="laya:test", label="fit 6.50/10", reasoning=f"resume {resume.id}")
 """
 
 SETTINGS = """
@@ -863,6 +873,24 @@ class TestCrashesAreRetriedForADay(PipelineTestCase):
             calls = sum(1 for c in process.call_args_list if c.args[1].id == "fake_0")
             self.run_once()
             self.assertEqual(sum(1 for c in process.call_args_list if c.args[1].id == "fake_0"), calls)  # final
+
+
+class TestScaledFitInRunLog(unittest.TestCase):
+    def test_a_run_log_line_shows_the_scaled_fit_with_the_raw_score(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = ("resumes: {folder: resumes, default: backend.txt}\n"
+                    "search: {queries: [swe], locations: [Remote], fetch_descriptions: false}\n"
+                    "boards: [fake]\nscorers: [laya_fixed]\ndiscovery: {github_readmes: []}\n"
+                    "decisions: {notify_at: 7, log_at: 5}\n")
+        path = write_project(tmp, settings, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        app = bootstrap(path, env={})
+        store = Store(app.settings.data_dir / "jobs.db")       # creates data_dir
+        (app.settings.data_dir / "fit_scale.json").write_text(
+            json.dumps({"laya:test": {"low": 3.0, "high": 7.0, "n": 40, "computed_at": "2026-01-01T00:00:00+00:00"}}),
+            encoding="utf-8")
+        logs = []
+        run(app, store, FakeNotifier(), log=logs.append)
+        self.assertTrue(any("(raw " in line for line in logs), logs)
 
 
 if __name__ == "__main__":

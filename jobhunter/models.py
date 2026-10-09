@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
+
+from jobhunter.fit_scale import is_expected_label
 
 
 @dataclass
@@ -42,9 +44,13 @@ class ScoreResult:
     label: str = ""                # how the result reads, when the score alone would misstate the decision
 
 
-def score_label(result: ScoreResult) -> str:
-    """How a result reads in alerts and logs: "8/10", "fit 72%" for a probability, or "n/a" for neither."""
+def score_label(result: ScoreResult, scales: Mapping[str, Any] | None = None) -> str:
+    """How a result reads in alerts and logs: "8/10", "fit 72%" for a probability, or "n/a" for neither. An expected
+    fit from a calibrated Laya checkpoint reads "fit 8.8/10 (raw 6.50)" (scaled 0-10, raw kept)."""
     if result.label:
+        scale = (scales or {}).get(result.model)
+        if scale is not None and result.score is not None and is_expected_label(result.label):
+            return f"fit {scale.scale(result.score):.1f}/10 (raw {result.score:.2f})"
         return result.label
     if result.score is None and result.probability is None:
         return "n/a"
