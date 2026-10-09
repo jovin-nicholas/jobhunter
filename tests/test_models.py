@@ -40,5 +40,33 @@ class TestScoreLabel(unittest.TestCase):
         self.assertEqual(score_label(ScoreResult(score=None, model="m")), "n/a")
 
 
+class TestScoreLabelScalesUnlabelledFits(unittest.TestCase):
+    """The tracker and tracker-calibrate treat an unlabelled whole Laya score as a real fit unless it is a decision
+    placeholder (fit_of); score_label must scale it the same way, not only a labelled "fit X/10" result."""
+    MODEL = "laya:~/models/questions"
+
+    def test_an_unlabelled_real_fit_is_scaled_like_a_labelled_one(self):
+        from jobhunter.fit_scale import FitScale
+        scales = {self.MODEL: FitScale(3.0, 7.0)}
+        result = ScoreResult(score=6.5, model=self.MODEL)              # e.g. the "from_score" method: no label
+        self.assertEqual(score_label(result, scales), "fit 8.8/10 (raw 6.50)")
+
+    def test_a_decision_placeholder_is_never_scaled(self):
+        from jobhunter.fit_scale import FitScale
+        scales = {"laya:~/models/old": FitScale(3.0, 7.0)}
+        result = ScoreResult(score=8, model="laya:~/models/old")       # whole number, no label: alert/save/skip
+        self.assertEqual(score_label(result, scales), "8/10")
+
+    def test_a_probability_result_is_never_scaled(self):
+        from jobhunter.fit_scale import FitScale
+        scales = {self.MODEL: FitScale(0.0, 1.0)}
+        result = ScoreResult(score=None, probability=0.72, model=self.MODEL)
+        self.assertEqual(score_label(result, scales), "fit 72%")
+
+    def test_no_scale_for_the_model_leaves_it_as_before(self):
+        result = ScoreResult(score=6.5, model=self.MODEL)
+        self.assertEqual(score_label(result), "6.5/10")
+
+
 if __name__ == "__main__":
     unittest.main()

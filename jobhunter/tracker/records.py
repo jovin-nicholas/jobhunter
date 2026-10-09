@@ -80,7 +80,8 @@ def fit_text(score: Any) -> str:
 
 def fit_fields(score: Any, label: str | None, model: str | None, scales: Mapping[str, FitScale]) -> dict:
     """fit (shown), fit_raw, fit_score (raw) and fit_scaled for a job's score: scaled 0-10 for a calibrated Laya
-    model's expected fit, raw otherwise; placeholders give no fit at all."""
+    model's expected fit, raw otherwise; placeholders give no fit at all. The rule for which scores are scaled (an
+    expected label, or no label at all, but never a decision placeholder) is shared with jobhunter.models.score_label."""
     fit = fit_of(score, label, model)
     scale = scales.get(model or "")
     scaled = scale.scale(fit) if scale is not None and fit is not None and (is_expected_label(label) or not label) \

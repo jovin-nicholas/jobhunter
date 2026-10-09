@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-from jobhunter.fit_scale import floor2, is_expected_label
+from jobhunter.fit_scale import fit_of, floor2, is_expected_label
 
 
 @dataclass
@@ -47,8 +47,8 @@ class ScoreResult:
 def score_label(result: ScoreResult, scales: Mapping[str, Any] | None = None) -> str:
     """How a result reads in alerts and logs: "8/10", "fit 72%" for a probability, or "n/a" for neither. An expected
     fit from a calibrated Laya checkpoint reads "fit 8.8/10 (raw 6.50)" (scaled 0-10, raw kept)."""
+    scale = (scales or {}).get(result.model)
     if result.label:
-        scale = (scales or {}).get(result.model)
         if scale is not None and result.score is not None and is_expected_label(result.label):
             return f"fit {scale.scale(result.score):.1f}/10 (raw {floor2(result.score):.2f})"
         return result.label
@@ -56,6 +56,11 @@ def score_label(result: ScoreResult, scales: Mapping[str, Any] | None = None) ->
         return "n/a"
     if result.score is None and result.probability is not None:
         return f"fit {result.probability:.0%}"
+    # Shared with jobhunter.tracker.records.fit_fields: a whole Laya score with no label is a decision placeholder
+    # (fit_of), never scaled; any other unlabelled score is a real fit and is scaled like a labelled one.
+    fit = fit_of(result.score, result.label, result.model)
+    if scale is not None and fit is not None:
+        return f"fit {scale.scale(fit):.1f}/10 (raw {floor2(fit):.2f})"
     return f"{result.score}/10"
 
 
