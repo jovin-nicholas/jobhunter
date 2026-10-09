@@ -367,6 +367,17 @@ class TestTrackerCalibrate(unittest.TestCase):
         self.assertIn("note: fits from laya:convaiinnovations/laya show as raw scores until "
                       "`tracker-calibrate` has run (after 30 or more scored jobs)", out)
 
+    def test_check_config_notes_an_unreadable_fit_scale_file(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = SETTINGS.replace("  - fixed: {}\n", "  - laya: {model: convaiinnovations/laya}\n")
+        path = write_project(tmp, settings, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        (tmp / "data").mkdir(parents=True, exist_ok=True)
+        (tmp / "data" / "fit_scale.json").write_text("{not json")
+        code, out, _ = cli("--settings", str(path), "check-config")
+        self.assertEqual(code, 0, out)
+        self.assertIn("note: fit_scale.json could not be read; run tracker-calibrate again", out)
+        self.assertNotIn("until `tracker-calibrate` has run", out)
+
 
 if __name__ == "__main__":
     unittest.main()

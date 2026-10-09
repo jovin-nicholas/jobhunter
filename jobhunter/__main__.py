@@ -243,12 +243,20 @@ def _calibrate(settings: Any) -> int:
 
 
 def _fit_scale_notes(settings: Any) -> list[str]:
-    """check-config notes: a configured Laya checkpoint that tracker-calibrate has not set a fit scale for yet."""
-    from jobhunter.fit_scale import MIN_FITS, load_scales
+    """check-config notes: a configured Laya checkpoint that tracker-calibrate has not set a fit scale for yet, or,
+    when fit_scale.json exists but load_scales could not read it (missing or malformed), one note saying so instead
+    of the per-model "has not run yet" note, which would be misleading: tracker-calibrate has run, its output is
+    just unreadable now."""
+    from jobhunter.fit_scale import MIN_FITS, SCALE_FILE, load_scales
     scales = load_scales(settings.data_dir)
     models = sorted({f"laya:{s.options['model']}" for s in settings.scorers if s.name == "laya"})
+    missing = [model for model in models if model not in scales]
+    if not missing:
+        return []
+    if not scales and (settings.data_dir / SCALE_FILE).exists():
+        return ["fit_scale.json could not be read; run tracker-calibrate again"]
     return [f"fits from {model} show as raw scores until `tracker-calibrate` has run (after {MIN_FITS} or more "
-            "scored jobs)" for model in models if model not in scales]
+            "scored jobs)" for model in missing]
 
 
 def _tracker_import(apps: Applications, path: str, dry_run: bool) -> int:
