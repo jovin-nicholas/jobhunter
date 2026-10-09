@@ -9,7 +9,7 @@ from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 from jobhunter.feedback import VERDICTS
-from jobhunter.fit_scale import FitScale, fit_of, is_expected_label, load_scales
+from jobhunter.fit_scale import FitScale, fit_of, floor2, is_expected_label, load_scales
 from jobhunter.store import Store
 from jobhunter.tracker import EVENT_KINDS, OPEN_STAGES, STAGES
 
@@ -73,8 +73,9 @@ def follow_up_date(value: Any, today: date) -> str:
 
 
 def fit_text(score: Any) -> str:
-    """The fit as the tracker shows it, one way for every scorer: "6.85", or "" without a score."""
-    return f"{float(score):.2f}" if isinstance(score, (int, float)) else ""
+    """The fit as the tracker shows it, one way for every scorer: "6.85", or "" without a score. Floored, not
+    rounded, like every other raw display (jobhunter.models.score_label)."""
+    return f"{floor2(float(score)):.2f}" if isinstance(score, (int, float)) else ""
 
 
 def fit_fields(score: Any, label: str | None, model: str | None, scales: Mapping[str, FitScale]) -> dict:

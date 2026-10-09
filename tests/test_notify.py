@@ -248,6 +248,13 @@ class TestScaledFit(unittest.TestCase):
         prob = ScoreResult(score=None, probability=0.72, model=self.MODEL, label="fit 72%")
         self.assertEqual(score_label(prob, scales), "fit 72%")                                 # probability label
 
+    def test_the_shown_raw_score_is_floored_not_rounded(self):
+        from jobhunter.fit_scale import FitScale
+        from jobhunter.models import score_label
+        scales = {self.MODEL: FitScale(3.0, 7.0)}
+        result = ScoreResult(score=6.4987, model=self.MODEL, label="fit 6.50/10")
+        self.assertIn("(raw 6.49)", score_label(result, scales))
+
     def test_the_alert_email_subject_shows_the_scaled_fit(self):
         from jobhunter.fit_scale import FitScale
         smtp = MagicMock()

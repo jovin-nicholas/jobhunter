@@ -363,3 +363,9 @@ class TestScaledFitInTheTracker(unittest.TestCase):
     def test_no_scale_file_shows_raw_as_before(self):
         (self.store.path.parent / "fit_scale.json").unlink()
         self.assertEqual({r["job_id"]: r["fit"] for r in self.apps.review_queue(14)}, {"dice_1": "6.50", "dice_2": "6.50"})
+
+    def test_fit_raw_is_floored_not_rounded(self):
+        self.store.save(Job("dice_3", "Engineer", "Acme", "Remote", "https://e.example/3", source="dice"),
+                        "notified", ScoreResult(score=6.4987, model="laya:~/models/other", label="fit 6.50/10"))
+        rows = {r["job_id"]: r for r in self.apps.review_queue(14)}
+        self.assertEqual(rows["dice_3"]["fit_raw"], "6.49")

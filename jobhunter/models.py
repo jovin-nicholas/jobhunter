@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-from jobhunter.fit_scale import is_expected_label
+from jobhunter.fit_scale import floor2, is_expected_label
 
 
 @dataclass
@@ -50,7 +50,7 @@ def score_label(result: ScoreResult, scales: Mapping[str, Any] | None = None) ->
     if result.label:
         scale = (scales or {}).get(result.model)
         if scale is not None and result.score is not None and is_expected_label(result.label):
-            return f"fit {scale.scale(result.score):.1f}/10 (raw {result.score:.2f})"
+            return f"fit {scale.scale(result.score):.1f}/10 (raw {floor2(result.score):.2f})"
         return result.label
     if result.score is None and result.probability is None:
         return "n/a"

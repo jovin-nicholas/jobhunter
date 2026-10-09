@@ -4,6 +4,7 @@ fits, from `tracker-calibrate`), with the raw score kept beside it. Cut-offs and
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 from contextlib import closing
@@ -32,6 +33,13 @@ def fit_of(score: Any, label: str | None, model: str | None) -> float | None:
 def is_expected_label(label: str | None) -> bool:
     """True for an expected-score fit label ("fit 6.42/10"), the only kind that is scaled."""
     return bool(label) and bool(_EXPECTED.match(label))
+
+
+def floor2(value: float) -> float:
+    """Floored to 2 decimals for display everywhere a raw score is shown; the tiny epsilon keeps 6.07 (stored as
+    6.06999...) at 6.07. Matches jobhunter.scorers.laya._floor2 (not imported from there to avoid a cycle: laya
+    imports jobhunter.models, which imports this module)."""
+    return math.floor(value * 100 + 1e-9) / 100
 
 
 @dataclass(frozen=True)
