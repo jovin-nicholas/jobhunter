@@ -80,6 +80,10 @@ class TestPage(unittest.TestCase):
     def test_a_missing_fit_says_why(self):
         self.assertIn("no fit score", self.text)
 
+    def test_the_scaled_fit_keeps_the_raw_value_in_a_tooltip(self):
+        self.assertIn("fit_raw", self.text)
+        self.assertIn("function fitCell(row)", self.text)
+
     def test_search_also_filters_the_review_queue(self):
         self.assertIn("state.review.filter(matchesReview)", self.text)
         self.assertIn("No matches for", self.text)

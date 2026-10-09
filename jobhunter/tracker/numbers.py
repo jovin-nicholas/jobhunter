@@ -52,7 +52,8 @@ def reply_numbers(apps: list[dict]) -> dict:
         "overall": _rate(apps),
         "by_board": _split(apps, lambda a: a.get("board") or "other"),
         "by_resume": _split(apps, lambda a: a.get("resume_id") or None),
-        "by_fit": sorted(_split(apps, lambda a: fit_band(a.get("fit_score"))),
+        "by_fit": sorted(_split(apps, lambda a: fit_band(a.get("fit_scaled") if a.get("fit_scaled") is not None
+                                                          else a.get("fit_score"))),
                          key=lambda r: FIT_BANDS.index(r["label"])),
         "by_week": _split(apps, lambda a: _week(a["applied_at"])),
         "median_days_to_reply": median(days) if days else None,

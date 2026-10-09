@@ -189,6 +189,17 @@ class TestCompose(unittest.TestCase):
                                            app(4, "screen", events=[("screen", "2026-10-09", "2026-10-05")])), TODAY)
         self.assertEqual(subject, "[jobhunter] Due today: Co1 · 1 call this week")
 
+    def test_an_entry_with_a_fit_shows_it_and_one_without_does_not(self):
+        with_fit = app(1, follow_up="2026-10-07")
+        with_fit["fit"] = "8.8"
+        without_fit = app(3, follow_up="2026-10-03")
+        _, plain, html = compose(self.items(with_fit, without_fit), TODAY)
+        self.assertIn("follow up today, fit 8.8", plain)
+        self.assertIn("(applied, follow up today, fit 8.8)", html)
+        overdue_plain = plain.split("Overdue")[1]
+        self.assertNotIn("fit", overdue_plain)
+        self.assertIn("(applied, follow up 4 days late)</span>", html)
+
     def test_footer_uses_configured_ghost_after_days(self):
         quiet_app = app(9, applied="2026-08-01")
         due_app = app(1, follow_up="2026-10-07")

@@ -334,3 +334,32 @@ class TestDeleteApplication(unittest.TestCase):
         apps.delete(gone)
         self.assertEqual([a["id"] for a in apps.all()], [keep])
         self.assertEqual([r["job_id"] for r in store.latest_feedback()], ["dice_2"])
+
+
+class TestScaledFitInTheTracker(unittest.TestCase):
+    MODEL = "laya:~/models/questions"
+
+    def setUp(self):
+        from jobhunter.fit_scale import save_scales
+        self.store = new_store()
+        self.store.save(Job("dice_1", "Engineer", "Acme", "Remote", "https://e.example/1", source="dice"),
+                        "notified", ScoreResult(score=6.5, model=self.MODEL, label="fit 6.50/10"))
+        self.store.save(Job("dice_2", "Engineer", "Globex", "Remote", "https://e.example/2", source="dice"),
+                        "notified", ScoreResult(score=6.5, model="laya:~/models/other", label="fit 6.50/10"))
+        save_scales(self.store.path.parent, {self.MODEL: {"low": 3.0, "high": 7.0, "n": 100, "computed_at": "x"}})
+        self.apps = Applications(self.store)
+
+    def test_review_rows_show_scaled_and_keep_raw(self):
+        rows = {r["job_id"]: r for r in self.apps.review_queue(14)}
+        self.assertEqual((rows["dice_1"]["fit"], rows["dice_1"]["fit_raw"], rows["dice_1"]["fit_scaled"]),
+                         ("8.8", "6.50", 8.75))
+        self.assertEqual((rows["dice_2"]["fit"], rows["dice_2"]["fit_raw"], rows["dice_2"]["fit_scaled"]),
+                         ("6.50", "6.50", None))
+
+    def test_applications_show_scaled_from_their_job(self):
+        app = self.apps.get(self.apps.add_from_job("dice_1", "2026-10-01"))
+        self.assertEqual((app["fit"], app["fit_raw"], app["fit_score"], app["fit_scaled"]), ("8.8", "6.50", 6.5, 8.75))
+
+    def test_no_scale_file_shows_raw_as_before(self):
+        (self.store.path.parent / "fit_scale.json").unlink()
+        self.assertEqual({r["job_id"]: r["fit"] for r in self.apps.review_queue(14)}, {"dice_1": "6.50", "dice_2": "6.50"})

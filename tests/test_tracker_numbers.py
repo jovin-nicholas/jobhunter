@@ -19,6 +19,14 @@ class TestNumbers(unittest.TestCase):
         self.assertEqual([fit_band(s) for s in (None, 3, 4.99, 5, 6.9, 7, 9.5)],
                          [None, "<5", "<5", "5–7", "5–7", "≥7", "≥7"])
 
+    def test_by_fit_uses_the_scaled_value_when_there_is_one(self):
+        scaled = app("2026-09-01", "dice", "backend.txt", 6.5)
+        scaled["fit_scaled"] = 8.75
+        raw = app("2026-09-02", "dice", "backend.txt", 6.5)
+        n = reply_numbers([scaled, raw])
+        bands = {r["label"] for r in n["by_fit"]}
+        self.assertEqual(bands, {"≥7", "5–7"})
+
     def test_rates_counts_and_too_few(self):
         apps = [app("2026-09-01", "dice", "backend.txt", 7.5, ("screen", "2026-09-04")),
                 app("2026-09-02", "dice", "backend.txt", 8.0, ("screen", "2026-09-12")),

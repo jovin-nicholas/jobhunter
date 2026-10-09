@@ -5,11 +5,11 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 from jobhunter.feedback import VERDICTS
-from jobhunter.fit_scale import fit_of
+from jobhunter.fit_scale import FitScale, fit_of, is_expected_label, load_scales
 from jobhunter.store import Store
 from jobhunter.tracker import EVENT_KINDS, OPEN_STAGES, STAGES
 
@@ -75,6 +75,17 @@ def follow_up_date(value: Any, today: date) -> str:
 def fit_text(score: Any) -> str:
     """The fit as the tracker shows it, one way for every scorer: "6.85", or "" without a score."""
     return f"{float(score):.2f}" if isinstance(score, (int, float)) else ""
+
+
+def fit_fields(score: Any, label: str | None, model: str | None, scales: Mapping[str, FitScale]) -> dict:
+    """fit (shown), fit_raw, fit_score (raw) and fit_scaled for a job's score: scaled 0-10 for a calibrated Laya
+    model's expected fit, raw otherwise; placeholders give no fit at all."""
+    fit = fit_of(score, label, model)
+    scale = scales.get(model or "")
+    scaled = scale.scale(fit) if scale is not None and fit is not None and (is_expected_label(label) or not label) \
+        else None
+    return {"fit": f"{scaled:.1f}" if scaled is not None else fit_text(fit), "fit_raw": fit_text(fit),
+            "fit_score": fit, "fit_scaled": scaled}
 
 
 def safe_url(url: str) -> str:
@@ -211,10 +222,22 @@ class Applications:
                 for r in conn.execute(f"SELECT id, application_id, kind, value, at, created_at FROM application_events "
                                       f"WHERE application_id IN ({','.join('?' * len(ids))}) ORDER BY at, id", ids):
                     events[r[1]].append({"id": r[0], "kind": r[2], "value": r[3], "at": r[4], "created_at": r[5]})
+            job_ids = {a["job_id"] for a in apps if a["job_id"]}
+            jobs: dict[str, tuple] = {}
+            if job_ids:
+                jobs = {jid: (model, label) for jid, model, label in conn.execute(
+                    f"SELECT id, source_model, score_label FROM jobs WHERE id IN ({','.join('?' * len(job_ids))})",
+                    tuple(job_ids))}
+        scales = load_scales(self.store.path.parent)
         for a in apps:
             a["events"] = events[a["id"]]
-            if a["fit_score"] is not None:
-                a["fit"] = fit_text(a["fit_score"])       # rows saved with a scorer's own label show the same way
+            if a["fit_score"] is not None and a["job_id"] in jobs:
+                model, label = jobs[a["job_id"]]
+                a.update(fit_fields(a["fit_score"], label, model, scales))   # rows saved with a scorer's own label
+            else:                                                           # show the same way, now scaled
+                a["fit_raw"], a["fit_scaled"] = fit_text(a["fit_score"]), None
+                if a["fit_score"] is not None:
+                    a["fit"] = fit_text(a["fit_score"])
         return apps
 
     def get(self, app_id: int) -> dict | None:
@@ -289,9 +312,10 @@ class Applications:
                 "AND COALESCE((SELECT f.verdict FROM feedback f WHERE f.job_id = j.id "
                 "ORDER BY f.received_at DESC, f.id DESC LIMIT 1), '') NOT IN ('bad', 'applied') "
                 "ORDER BY j.run_at DESC, j.id DESC LIMIT 200", (cutoff,)).fetchall()
+        scales = load_scales(self.store.path.parent)
         return [{"job_id": i, "title": t or "", "company": c or "", "url": safe_url(u or ""), "board": b or "",
-                 "fit": fit_text(fit), "fit_score": fit, "alerted_at": at}
-                for i, t, c, u, b, label, score, at, model in rows for fit in [fit_of(score, label, model)]]
+                 "alerted_at": at, **fit_fields(score, label, model, scales)}
+                for i, t, c, u, b, label, score, at, model in rows]
 
     def hide_from_review(self, job_id: str) -> None:
         with self.store.connect() as conn:

@@ -40,7 +40,8 @@ def due_items(apps: list[dict], settings: TrackerSettings, today: date, since: d
     def entry(app: dict, reason: str, when: str, sort: str) -> dict:
         return {"id": app["id"], "company": app.get("company") or "", "title": app.get("title") or "",
                 "url": safe_url(app.get("url") or ""), "stage": app["stage"], "people": app.get("people") or "",
-                "notes": app.get("notes") or "", "reason": reason, "when": when, "sort": sort}
+                "notes": app.get("notes") or "", "reason": reason, "when": when, "sort": sort,
+                "fit": app.get("fit") or ""}
     for app in apps:
         if app["stage"] in CLOSED_STAGES or app["stage"] == "offer":     # offers are never in the email
             continue
@@ -89,8 +90,9 @@ def _subject(items: dict) -> str:
 
 
 def _plain_entry(e: dict) -> str:
+    fit = f", fit {e['fit']}" if e.get("fit") else ""
     lines = [f"- {_one_line(e['company']) or '—'}: {_one_line(e['title']) or '—'} ({e['stage']}), {e['reason']} "
-             f"{e['when']}"]
+             f"{e['when']}{fit}"]
     if e["url"]:
         lines.append(f"  {e['url']}")
     if e["people"]:
@@ -103,13 +105,14 @@ def _plain_entry(e: dict) -> str:
 def _html_entry(e: dict) -> str:
     esc = lambda s: html_lib.escape(str(s or ""), quote=True)    # noqa: E731
     title = f'<a href="{esc(e["url"])}">{esc(e["title"] or "—")}</a>' if e["url"] else esc(e["title"] or "—")
+    fit = f", fit {esc(e['fit'])}" if e.get("fit") else ""
     extra = ""
     if e["people"]:
         extra += f'<div style="color:#555">People: {esc(e["people"])}</div>'
     if e["notes"]:
         extra += f'<div style="color:#555">Notes: {esc(e["notes"]).replace(chr(10), "<br>")}</div>'
     return (f'<li style="margin:0 0 10px"><strong>{esc(e["company"] or "—")}</strong>: {title} '
-            f'<span style="color:#555">({esc(e["stage"])}, {esc(e["reason"])} {esc(e["when"])})</span>{extra}</li>')
+            f'<span style="color:#555">({esc(e["stage"])}, {esc(e["reason"])} {esc(e["when"])}{fit})</span>{extra}</li>')
 
 
 def compose(items: dict, today: date) -> tuple[str, str, str] | None:
