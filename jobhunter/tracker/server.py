@@ -29,7 +29,7 @@ TOKEN_HEADER = "X-Tracker-Token"
 CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; "
        "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 EXPORT_COLUMNS = ("company", "title", "url", "stage", "applied_at", "stage_at", "follow_up_at", "board", "fit",
-                  "resume_id", "people", "notes")
+                  "fit_scaled", "resume_id", "people", "notes")
 _SPLIT = re.compile(r"\s+[—–-]\s+")          # "Acme — Backend Engineer" (but "Rolls-Royce" stays whole)
 _APP_PATH = re.compile(r"/api/applications/(\d+)(/stage|/follow-up|/description|/delete)?")
 
@@ -54,12 +54,23 @@ def parse_quick_add(text: str) -> tuple[str, str, str]:
     return ("", parts[0], parts[1]) if len(parts) == 2 else ("", text, "")
 
 
+def _export_value(a: dict, column: str) -> Any:
+    """Every column reads straight from the application dict, except `fit`, which exports the raw text (fit_raw):
+    the scaled fit (0-10) has its own `fit_scaled` column, one decimal or empty, so raw is never lost to a CSV."""
+    if column == "fit":
+        return a.get("fit_raw")
+    if column == "fit_scaled":
+        scaled = a.get("fit_scaled")
+        return f"{scaled:.1f}" if scaled is not None else ""
+    return a.get(column)
+
+
 def export_csv(apps: list[dict]) -> str:
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(EXPORT_COLUMNS)
     for a in apps:
-        writer.writerow([csv_cell(a.get(c)) for c in EXPORT_COLUMNS])
+        writer.writerow([csv_cell(_export_value(a, c)) for c in EXPORT_COLUMNS])
     return out.getvalue()
 
 

@@ -8,7 +8,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from jobhunter.models import Job
+from jobhunter.models import Job, ScoreResult
 from jobhunter.settings import TrackerSettings
 from jobhunter.store import Store
 from jobhunter.tracker.records import Applications
@@ -199,6 +199,20 @@ class TestApi(ServerTestCase):
         self.assertIn("attachment", resp.getheader("Content-Disposition"))
         rows = list(csv.DictReader(io.StringIO(body.decode())))
         self.assertEqual((rows[0]["company"], rows[0]["title"]), ("'+Acme", "'=HYPERLINK(\"http://x\")"))
+
+    def test_export_fit_column_stays_raw_with_a_separate_scaled_column(self):
+        from jobhunter.fit_scale import save_scales
+        model = "laya:~/models/questions"
+        self.store.save(Job("dice_2", "Backend Engineer", "Globex", "Remote", "https://jobs.example.com/globex/1",
+                            description="Java", source="dice"),
+                        "notified", ScoreResult(score=6.5, model=model, label="fit 6.50/10"))
+        save_scales(self.store.path.parent, {model: {"low": 3.0, "high": 7.0, "n": 100, "computed_at": "x"}})
+        self.apps.add_from_job("dice_2", "2026-10-01")
+        status, _, body = self.call("GET", "/api/export.csv?t=secret-token", token=None)
+        self.assertEqual(status, 200)
+        rows = list(csv.DictReader(io.StringIO(body.decode())))
+        row = next(r for r in rows if r["company"] == "Globex")
+        self.assertEqual((row["fit"], row["fit_scaled"]), ("6.50", "8.8"))
 
 
 class TestFetchSetting(ServerTestCase):
