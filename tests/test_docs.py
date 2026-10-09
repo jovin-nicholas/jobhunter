@@ -26,6 +26,13 @@ class TestSettingsDoc(unittest.TestCase):
         self.assertIn("log_at", fit_scale)
         self.assertIn("raw", fit_scale)
 
+    def test_fit_scale_says_a_retrained_checkpoint_needs_a_new_folder(self):
+        text = (ROOT / "docs" / "settings.md").read_text(encoding="utf-8")
+        fit_scale = text[text.index("**Fit scale.**"):]
+        fit_scale = fit_scale[:fit_scale.index("\n\n")]
+        self.assertIn("new folder", fit_scale)
+        self.assertIn("pool", fit_scale)
+
 
 class TestFullExample(unittest.TestCase):
     def test_hyde_park_is_read_by_its_own_board_not_also_by_getro(self):
