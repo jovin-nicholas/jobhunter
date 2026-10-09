@@ -9,6 +9,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from jobhunter.feedback import VERDICTS
+from jobhunter.fit_scale import fit_of
 from jobhunter.store import Store
 from jobhunter.tracker import EVENT_KINDS, OPEN_STAGES, STAGES
 
@@ -69,16 +70,6 @@ def event_date(value: Any, today: date, stage: str | None = None) -> str:
 
 def follow_up_date(value: Any, today: date) -> str:
     return _within(value, _years_from(today, -1), _years_from(today, 2))
-
-
-def fit_of(score: Any, label: str | None, model: str | None) -> float | None:
-    """The job's fit score, or None when its score is a decision placeholder: a Laya checkpoint trained on alert,
-    save or skip stores 8, 6 or 3 with no fit label, which is not a fit and must not land in the fit bands."""
-    if not isinstance(score, (int, float)):
-        return None
-    if (model or "").startswith("laya") and not label and float(score).is_integer():
-        return None
-    return score
 
 
 def fit_text(score: Any) -> str:
