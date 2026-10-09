@@ -299,6 +299,65 @@ class TestTrackerCalibrate(unittest.TestCase):
         self.assertIn("no Laya model has 30", out)
         self.assertFalse((tmp / "data" / "fit_scale.json").exists())
 
+    def test_calibrate_warns_about_bounds_from_few_scores(self):
+        from jobhunter.models import Job, ScoreResult
+        from jobhunter.store import Store
+        tmp = Path(tempfile.mkdtemp())
+        path = write_project(tmp, SETTINGS, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        store = Store(tmp / "data" / "jobs.db")
+        for i in range(40):                                       # 40 >= MIN_FITS but < 100
+            s = 3.0 + i * 0.1
+            store.save(Job(f"dice_{i}", "Engineer", "Acme", "Remote", f"https://e.example/{i}"), "logged",
+                       ScoreResult(score=s, model="laya:~/models/questions", label=f"fit {s:.2f}/10"))
+        code, out, _ = cli("--settings", str(path), "tracker-calibrate")
+        self.assertEqual(code, 0, out)
+        self.assertIn("bounds from few scores; run again later", out)
+
+    def test_calibrate_does_not_warn_about_few_scores_at_100_or_more(self):
+        from jobhunter.models import Job, ScoreResult
+        from jobhunter.store import Store
+        tmp = Path(tempfile.mkdtemp())
+        path = write_project(tmp, SETTINGS, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        store = Store(tmp / "data" / "jobs.db")
+        for i in range(100):
+            s = 3.0 + i * 0.04
+            store.save(Job(f"dice_{i}", "Engineer", "Acme", "Remote", f"https://e.example/{i}"), "logged",
+                       ScoreResult(score=s, model="laya:~/models/questions", label=f"fit {s:.2f}/10"))
+        code, out, _ = cli("--settings", str(path), "tracker-calibrate")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("bounds from few scores", out)
+        self.assertNotIn("every alert will read 10.0", out)         # no alert_at configured: nothing to compare
+
+    def test_calibrate_warns_when_the_scaled_ceiling_hides_the_alert_cutoff(self):
+        from jobhunter.models import Job, ScoreResult
+        from jobhunter.store import Store
+        tmp = Path(tempfile.mkdtemp())
+        settings = SETTINGS.replace("  - fixed: {}\n", "  - laya: {model: '~/models/questions', alert_at: 9.5}\n")
+        path = write_project(tmp, settings, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        store = Store(tmp / "data" / "jobs.db")
+        for i in range(100):                                       # spans about 3.0 to 6.96: well below alert_at 9.5
+            s = 3.0 + i * 0.04
+            store.save(Job(f"dice_{i}", "Engineer", "Acme", "Remote", f"https://e.example/{i}"), "logged",
+                       ScoreResult(score=s, model="laya:~/models/questions", label=f"fit {s:.2f}/10"))
+        code, out, _ = cli("--settings", str(path), "tracker-calibrate")
+        self.assertEqual(code, 0, out)
+        self.assertIn("every alert will read 10.0", out)
+
+    def test_calibrate_does_not_warn_when_the_ceiling_covers_the_alert_cutoff(self):
+        from jobhunter.models import Job, ScoreResult
+        from jobhunter.store import Store
+        tmp = Path(tempfile.mkdtemp())
+        settings = SETTINGS.replace("  - fixed: {}\n", "  - laya: {model: '~/models/questions', alert_at: 6.0}\n")
+        path = write_project(tmp, settings, plugins={"boards.py": BOARDS, "scorers.py": SCORERS})
+        store = Store(tmp / "data" / "jobs.db")
+        for i in range(100):                                       # spans about 3.0 to 6.96: above alert_at 6.0
+            s = 3.0 + i * 0.04
+            store.save(Job(f"dice_{i}", "Engineer", "Acme", "Remote", f"https://e.example/{i}"), "logged",
+                       ScoreResult(score=s, model="laya:~/models/questions", label=f"fit {s:.2f}/10"))
+        code, out, _ = cli("--settings", str(path), "tracker-calibrate")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("every alert will read 10.0", out)
+
     def test_check_config_notes_a_laya_checkpoint_without_a_fit_scale(self):
         tmp = Path(tempfile.mkdtemp())
         settings = SETTINGS.replace("  - fixed: {}\n", "  - laya: {model: convaiinnovations/laya}\n")

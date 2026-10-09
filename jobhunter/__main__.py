@@ -208,17 +208,36 @@ def _follow_up_email(settings: Any, store: Store, test: bool = False) -> int:
     return 0
 
 
+FEW_FITS = 100           # bounds from fewer real fits than this are noisy; tracker-calibrate says so, but saves them
+
+
+def _alert_ats(settings: Any) -> dict[str, float]:
+    """Each laya scorer's own configured alert_at, by its source_model key ("laya:<model>"); a checkpoint's own
+    cut-off (read from its rl_agent_config.json) is not resolved here, to keep this a settings-only lookup."""
+    return {f"laya:{s.options['model']}": s.options["alert_at"] for s in settings.scorers
+            if s.name == "laya" and s.options.get("alert_at") is not None}
+
+
 def _calibrate(settings: Any) -> int:
-    """Fixed fit-scale bounds per Laya checkpoint from jobs.db: the 1st and 99th percentile of its real fits."""
+    """Fixed fit-scale bounds per Laya checkpoint from jobs.db: the 1st and 99th percentile of its real fits. Warns
+    when a checkpoint's bounds rest on few scores, or when its ceiling is below the configured alert cut-off (every
+    alert would then read the same 10.0)."""
     from jobhunter.fit_scale import MIN_FITS, calibrate, save_scales
     db = settings.data_dir / "jobs.db"
     bounds = calibrate(db) if db.exists() else {}
     if not bounds:
         print(f"no Laya model has {MIN_FITS} or more fit scores yet; nothing changed (fits show as raw scores)")
         return 0
+    alert_ats = _alert_ats(settings)
     path = save_scales(settings.data_dir, bounds)
     for model, b in bounds.items():
         print(f"{model}: raw {b['low']:.2f} -> 0, raw {b['high']:.2f} -> 10 ({b['n']} fits)")
+        if b["n"] < FEW_FITS:
+            print(f"  warning: {model}: bounds from few scores; run again later")
+        alert_at = alert_ats.get(model)
+        if alert_at is not None and b["high"] < alert_at:
+            print(f"  warning: {model}: high ({b['high']:.2f}) is below the alert cut-off ({alert_at:.2f}); "
+                  "every alert will read 10.0")
     print(f"saved {path}; run it again after changing checkpoints")
     return 0
 
