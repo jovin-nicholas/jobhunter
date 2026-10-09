@@ -84,6 +84,11 @@ class TestPage(unittest.TestCase):
         self.assertIn("fit_raw", self.text)
         self.assertIn("function fitCell(row)", self.text)
 
+    def test_the_drawer_eyebrow_shows_the_raw_fit_in_a_tooltip_when_it_differs(self):
+        # The drawer's eyebrow line (board · fit · resume) must show the raw value the same way the table cells do
+        # (fitCell): a tooltip, only when the scaled fit differs from the raw one.
+        self.assertIn('title: "raw " + a.fit_raw', self.text)
+
     def test_search_also_filters_the_review_queue(self):
         self.assertIn("state.review.filter(matchesReview)", self.text)
         self.assertIn("No matches for", self.text)

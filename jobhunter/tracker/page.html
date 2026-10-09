@@ -326,9 +326,13 @@ function renderDrawer() {
   const follow = el("input", {type: "date", id: "follow-up", value: a.follow_up_at || "",
     on: {blur: e => validDate(e.target.value) && e.target.value !== a.follow_up_at
                     && act(`/api/applications/${a.id}/follow-up`, {date: e.target.value}, "Follow-up set")}});
+  // Same rule as fitCell: a scaled fit keeps the raw value in a tooltip, so the eyebrow never hides where it came from.
+  const fitPart = a.fit && (a.fit_raw && a.fit_raw !== a.fit
+    ? el("span", {title: "raw " + a.fit_raw}, `fit ${a.fit}`) : `fit ${a.fit}`);
+  const eyebrow = [a.board, fitPart, a.resume_id && `resume: ${a.resume_id}`].filter(Boolean);
   drawer.replaceChildren(...kids(
     el("button", {type: "button", class: "close", "aria-label": "Close", on: {click: closeDrawer}}, "×"),
-    el("p", {class: "eyebrow"}, [a.board, a.fit && `fit ${a.fit}`, a.resume_id && `resume: ${a.resume_id}`].filter(Boolean).join(" · ")),
+    el("p", {class: "eyebrow"}, eyebrow.flatMap((part, i) => i ? [" · ", part] : [part])),
     editable(a, "company", "edit big", "Company"), editable(a, "title", "edit", "Title"),
     safeHref(a.url) ? el("p", {}, el("a", {href: safeHref(a.url), target: "_blank", rel: "noopener noreferrer"}, "Open the posting ↗")) : null,
     el("div", {class: "stages"}, stages,
