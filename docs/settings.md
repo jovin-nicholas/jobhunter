@@ -177,8 +177,8 @@ Settings for `jobhunter tracker`, the application tracker. All optional.
 scaled to 0-10, between that checkpoint's 1st and 99th percentile of its real fits so far. The bounds live in
 `data/fit_scale.json`, one entry per checkpoint, written by `tracker-calibrate` (needs 30 or more scored jobs from
 that checkpoint); until then, or for a checkpoint with no bounds yet, its fits show as raw scores. Alert and save
-cut-offs always compare against the raw score, never the scaled one. Run `tracker-calibrate` again after changing
-checkpoints, since the bounds are specific to one checkpoint's scores.
+cut-offs, and `decisions` (`notify_at` / `log_at`), always compare against the raw score, never the scaled one. Run
+`tracker-calibrate` again after changing checkpoints, since the bounds are specific to one checkpoint's scores.
 
 ## notify
 

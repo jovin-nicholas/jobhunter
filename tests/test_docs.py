@@ -16,6 +16,17 @@ class TestReadme(unittest.TestCase):
             self.assertTrue((ROOT / path).exists(), path)
 
 
+class TestSettingsDoc(unittest.TestCase):
+    def test_fit_scale_says_decisions_also_compare_raw(self):
+        text = (ROOT / "docs" / "settings.md").read_text(encoding="utf-8")
+        fit_scale = text[text.index("**Fit scale.**"):]
+        fit_scale = fit_scale[:fit_scale.index("\n\n")]
+        self.assertIn("decisions", fit_scale)
+        self.assertIn("notify_at", fit_scale)
+        self.assertIn("log_at", fit_scale)
+        self.assertIn("raw", fit_scale)
+
+
 class TestFullExample(unittest.TestCase):
     def test_hyde_park_is_read_by_its_own_board_not_also_by_getro(self):
         text = (ROOT / "examples" / "full.yaml").read_text(encoding="utf-8")
