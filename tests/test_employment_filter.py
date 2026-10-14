@@ -349,11 +349,14 @@ class TestBoardEmploymentType(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertTrue(f().check(job(employment_type=label)).keep, label)
 
-    def test_a_listing_that_is_also_full_time_is_left_to_the_text(self):
+    def test_a_listing_that_is_also_full_time_still_skips(self):
         for label in ("Full-time, Contract", "Full-time, Part-time, Contract, Third Party"):
             with self.subTest(label=label):
-                self.assertTrue(f().check(job(employment_type=label)).keep, label)
-                self.assertFalse(f().check(job(employment_type=label, description="6-month contract")).keep, label)
+                self.assertEqual(f().check(job(employment_type=label)).reason, f"contract: listed as {label}")
+
+    def test_full_time_contract_to_hire_follows_the_contract_to_hire_setting(self):
+        self.assertTrue(f().check(job(employment_type="Full-time, Contract to Hire")).keep)
+        self.assertFalse(f(contract_to_hire="exclude").check(job(employment_type="Full-time, Contract to Hire")).keep)
 
     def test_contract_to_hire_listings_follow_the_contract_to_hire_setting(self):
         self.assertTrue(f().check(job(employment_type="Contract to Hire")).keep)

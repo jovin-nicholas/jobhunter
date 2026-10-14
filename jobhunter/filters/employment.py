@@ -1,5 +1,5 @@
 """Skips contract and hourly-pay jobs. A board that lists the employment type or pay (Dice: "Contract, Third Party",
-"$45 - $55 hourly", kept in `job.extra`) is believed first; a listing that is also full-time is left to the text.
+"$45 - $55 hourly", kept in `job.extra`) is believed first, including a contract listing that also says full-time.
 Then the title and description are read for wording that signals one (for contracts, only while `contract_text` is
 on): a title word like "contract" or "temp", an hourly rate stated in dollars, a fixed-term phrase such as "6-month
 contract", or an explicit "employment type: contract" label. A skip is final, so each rule asks for wording that names
@@ -111,11 +111,9 @@ _LISTED_HOURLY_RE = re.compile(rf"(?:\$\s*)?{_NUM}(?:\s*-\s*\$?\s*{_NUM})?(?:\s+
 
 
 def _listed_contract(label: str, contract_to_hire: str) -> bool:
-    """Whether a board's employment type ("Contract, Third Party") marks a contract role. One that is also full-time
-    ("Full-time, Contract") is not decided here."""
+    """Whether a board's employment type ("Contract, Third Party") marks a contract role, also when it lists full-time
+    as well ("Full-time, Contract": mostly staffing posts)."""
     parts = {part.strip().lower() for part in label.split(",")}
-    if parts & {"full-time", "full time", "fulltime"}:
-        return False
     return "contract" in parts or ("contract to hire" in parts and contract_to_hire == "exclude")
 
 
