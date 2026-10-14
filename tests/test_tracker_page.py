@@ -94,16 +94,16 @@ class TestPage(unittest.TestCase):
         self.assertIn("No matches for", self.text)
 
     def test_applications_and_alerts_are_separate_pages(self):
-        for view in ('id="view-apps"', 'id="view-alerts"', 'id="view-numbers"'):
+        for view in ('id="view-alerts"', 'id="view-numbers"'):
             self.assertIn(view, self.text)
         self.assertIn('view === "alerts" ? renderAlerts()', self.text)
         self.assertNotIn("state.review", self.text.split("function renderApps()")[1].split("function renderAlerts()")[0])
 
-    def test_the_stage_row_is_counts_not_a_second_filter_and_only_on_the_applications_page(self):
-        # "applied" as a filter repeated the applications link next to it, so the stage row only counts.
-        self.assertIn('pipeline.hidden = strip.hidden = view !== "apps"', self.text)
-        self.assertNotIn("stageFilter", self.text)
-        self.assertNotIn('"filter by stage"', self.text)
+    def test_the_stage_row_is_the_way_to_applications_and_there_is_no_separate_applications_link(self):
+        self.assertNotIn('id="view-apps"', self.text)
+        self.assertNotIn('pipeline.hidden', self.text)                       # on every page
+        self.assertIn('stageFilter = stageFilter === s && view === "apps" ? null : s; view = "apps"', self.text)
+        self.assertIn('id="brand"', self.text)                               # the brand shows all applications
 
     def test_bad_matches_and_hidden_are_a_tab_at_the_top_of_the_alerts_page(self):
         self.assertIn('id: "alerts-tabs"', self.text.split("function renderAlerts()")[1].split("\nfunction ")[0])

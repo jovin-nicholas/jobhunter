@@ -22,7 +22,7 @@ button, input, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 header { position: sticky; top: 0; background: var(--paper); border-bottom: 1px solid var(--rule); padding: 12px 20px; z-index: 2; }
 .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.brand { font-weight: 600; letter-spacing: .02em; margin-right: 8px; }
+.brand { font-weight: 600; letter-spacing: .02em; margin-right: 8px; background: none; border: 0; padding: 0; cursor: pointer; }
 .add { flex: 1 1 420px; display: flex; gap: 8px; align-items: center; min-width: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #quick { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--raised); }
@@ -105,7 +105,7 @@ pre.jd { white-space: pre-wrap; font: 13px/1.5 var(--sans); background: var(--pa
 <body>
 <header>
   <div class="bar">
-    <span class="brand">jobhunter · applications</span>
+    <button class="brand" id="brand" type="button" title="All applications">jobhunter · applications</button>
     <div class="add">
       <label for="quick" class="sr-only">Add application</label>
       <input id="quick" type="text" autocomplete="off" placeholder="New application: paste a job link, or type Company — Title">
@@ -113,7 +113,6 @@ pre.jd { white-space: pre-wrap; font: 13px/1.5 var(--sans); background: var(--pa
     </div>
     <input id="search" type="search" aria-label="Search applications" placeholder="Search company, title, notes" hidden>
     <button class="link" id="search-open" type="button" title="Search (⌘K)">search</button>
-    <button class="link" id="view-apps" type="button">applications</button>
     <button class="link" id="view-alerts" type="button">alerts <span class="num" id="alerts-count"></span></button>
     <button class="link" id="view-numbers" type="button">numbers</button>
     <a class="link" id="export" download="applications.csv">export</a>
@@ -151,8 +150,8 @@ const TOKEN = (() => {
 })();
 const STAGE_KEYS = {s: "screen", i: "interview", o: "offer", r: "rejected", w: "withdrawn", g: "ghosted"};
 const KEY_OF = Object.fromEntries(Object.entries(STAGE_KEYS).map(([k, s]) => [s, k]));
-const VIEWS = ["apps", "alerts", "numbers"];
-let state = null, view = "apps", cursor = 0, openId = null, query = "", showClosed = false;
+const VIEWS = ["apps", "alerts", "numbers"];      // "apps" has no header link: the brand and the stage row open it
+let state = null, view = "apps", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
 let alertsTab = "review";      // alerts page: "review" or "dismissed"
 let visible = [];          // rows j/k move through: {type: "app", id} or {type: "review", job_id}
 let toastTimer = null;
@@ -220,6 +219,7 @@ function fmt(iso) { return new Date(iso.slice(0, 10) + "T12:00:00").toLocaleDate
 function allApps() { return state ? [...state.groups.needs, ...state.groups.waiting, ...state.groups.closed] : []; }
 function findApp(id) { return allApps().find(a => a.id === id) || null; }
 function matches(a) {
+  if (stageFilter && a.stage !== stageFilter) return false;
   if (!query) return true;
   const q = query.toLowerCase();
   return [a.company, a.title, a.notes, a.people].some(v => (v || "").toLowerCase().includes(q));
@@ -231,7 +231,7 @@ function matchesReview(r) {
 function render() {
   if (!state) return;
   renderPipeline();
-  for (const v of VIEWS) document.getElementById(`view-${v}`).classList.toggle("on", view === v);
+  for (const v of ["alerts", "numbers"]) document.getElementById(`view-${v}`).classList.toggle("on", view === v);
   document.getElementById("alerts-count").textContent = state.review.length || "";
   document.getElementById("export").setAttribute("href", `/api/export.csv?t=${encodeURIComponent(TOKEN || "")}`);
   const main = document.getElementById("main");
@@ -242,11 +242,12 @@ function render() {
 function renderPipeline() {
   const open = state.open_stages, closed = state.closed_stages, counts = state.counts;
   const total = open.reduce((sum, s) => sum + counts[s], 0);
-  // Counts only: a stage filter here repeated the applications link ("applied" showed the same list).
-  const button = s => el("span", {}, `${s} `, el("span", {class: "num"}, counts[s]));
-  // The stage counts are about applications, so they show only on that page.
-  const pipeline = document.getElementById("pipeline"), strip = document.getElementById("strip");
-  pipeline.hidden = strip.hidden = view !== "apps";
+  // The way to the applications page (there is no separate link): a stage shows its applications, clicking it
+  // again on that page shows them all.
+  const button = s => el("button", {type: "button", class: view === "apps" && stageFilter === s ? "on" : "",
+    on: {click: () => { stageFilter = stageFilter === s && view === "apps" ? null : s; view = "apps"; render(); }}},
+    `${s} `, el("span", {class: "num"}, counts[s]));
+  const pipeline = document.getElementById("pipeline");
   pipeline.replaceChildren(
     ...open.flatMap((s, i) => i < open.length - 1 ? [button(s), el("span", {"aria-hidden": "true"}, "▸")] : [button(s)]),
     el("span", {style: "margin-left:auto"}), ...closed.map(button));
@@ -518,7 +519,8 @@ document.getElementById("search-open").addEventListener("click", () => {
   search.hidden = false; search.focus();
 });
 document.getElementById("search").addEventListener("input", e => { query = e.target.value.trim(); render(); });
-for (const v of VIEWS) document.getElementById(`view-${v}`).addEventListener("click", () => { view = v; render(); });
+for (const v of ["alerts", "numbers"]) document.getElementById(`view-${v}`).addEventListener("click", () => { view = v; render(); });
+document.getElementById("brand").addEventListener("click", () => { view = "apps"; stageFilter = null; render(); });
 document.getElementById("help-open").addEventListener("click", () => { document.getElementById("help").hidden = false; });
 document.getElementById("help").addEventListener("click", () => { document.getElementById("help").hidden = true; });
 window.addEventListener("popstate", () => { if (openId !== null) { openId = null; render(); } });
