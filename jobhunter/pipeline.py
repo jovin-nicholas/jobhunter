@@ -175,6 +175,7 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
         if job.source in boards and job.id not in listed:
             new_jobs.append(job)
             listed.add(job.id)
+    new_jobs = take_turns(new_jobs)
     for job in new_jobs:
         summary[job.source].new += 1
     notified = {same_job_key(t, c) for t, c in store.recently_notified(REPEAT_DAYS)}
@@ -206,6 +207,19 @@ def run(app: App, store: Any, notifier: Any, *, only: set[str] | None = None, dr
     for note in sorted(notes):
         log(note)
     return summary
+
+
+def take_turns(jobs: list[Job]) -> list[Job]:
+    """The jobs with boards taking turns (one from each board, then the next from each), each board's own order kept.
+    A run that takes hours, such as one paused by sleep, then judges every board's jobs early instead of leaving the
+    smaller boards until the biggest is done."""
+    queues: dict[str, list[Job]] = {}
+    for job in jobs:
+        queues.setdefault(job.source, []).append(job)
+    ordered: list[Job] = []
+    for turn in range(max((len(q) for q in queues.values()), default=0)):
+        ordered.extend(q[turn] for q in queues.values() if turn < len(q))
+    return ordered
 
 
 def _discovers(name: str, board: Any) -> bool:

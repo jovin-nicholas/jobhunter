@@ -9,7 +9,7 @@ from pathlib import Path
 
 from jobhunter.errors import SettingsError
 from jobhunter.models import Job
-from jobhunter.pipeline import bootstrap, run
+from jobhunter.pipeline import bootstrap, run, take_turns
 from jobhunter.store import Store
 from tests.helpers import status_counts, write_project
 
@@ -895,3 +895,57 @@ class TestScaledFitInRunLog(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTakeTurns(unittest.TestCase):
+    def job(self, source, n):
+        return Job(f"{source}_{n}", f"Engineer {n}", "Acme", "Remote", f"https://example.com/{source}/{n}",
+                   source=source)
+
+    def test_boards_take_turns_and_each_keeps_its_own_order(self):
+        jobs = [self.job("big", i) for i in range(4)] + [self.job("small", i) for i in range(2)] + [self.job("one", 0)]
+        self.assertEqual([j.id for j in take_turns(jobs)],
+                         ["big_0", "small_0", "one_0", "big_1", "small_1", "big_2", "big_3"])
+
+    def test_one_board_or_none(self):
+        jobs = [self.job("big", i) for i in range(3)]
+        self.assertEqual(take_turns(jobs), jobs)
+        self.assertEqual(take_turns([]), [])
+
+
+TWO_BOARDS = """
+from jobhunter import Job, board
+
+
+@board("many")
+class Many:
+    def __init__(self, options):
+        pass
+
+    def search(self, ctx):
+        for i in range(3):
+            yield Job(f"many_{i}", f"Great Engineer {i}", "Acme", "Remote - US", f"https://example.com/m{i}",
+                      description="Java")
+
+
+@board("few")
+class Few:
+    def __init__(self, options):
+        pass
+
+    def search(self, ctx):
+        yield Job("few_0", "Great Engineer F", "Globex", "Remote - US", "https://example.com/f0", description="Java")
+"""
+
+
+class TestRunTakesTurns(unittest.TestCase):
+    def test_a_small_board_is_not_left_until_a_big_board_is_done(self):
+        tmp = Path(tempfile.mkdtemp())
+        settings = ("resumes: {folder: resumes, default: backend.txt}\n"
+                    "search: {queries: [swe], locations: [Remote], fetch_descriptions: false}\n"
+                    "boards: [many, few]\nscorers: [fixed]\ndiscovery: {github_readmes: []}\n"
+                    "decisions: {notify_at: 7, log_at: 5}\n")
+        app = bootstrap(write_project(tmp, settings, plugins={"two.py": TWO_BOARDS, "scorers.py": SCORERS}), env={})
+        notifier = FakeNotifier()
+        run(app, Store(tmp / "data" / "jobs.db"), notifier, log=lambda line: None)
+        self.assertEqual([job_id for job_id, _, _ in notifier.sent], ["many_0", "few_0", "many_1", "many_2"])
