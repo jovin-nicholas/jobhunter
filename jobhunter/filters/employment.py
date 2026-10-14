@@ -1,10 +1,12 @@
-"""Skips contract and hourly-pay jobs. No board reports employment type, so the title and description are read for
-wording that signals one: a title word like "contract" or "temp", an hourly rate stated in dollars, a fixed-term
-phrase such as "6-month contract", or an explicit "employment type: contract" label. A skip is final, so each rule
-asks for wording that names the arrangement: a bare "1099" (as in "Form 1099 processing"), a product that handles
-contractors ("independent contractor onboarding", "help freelancers work as a contractor"), a number per hour without
-a currency in the description ("10,000/hr transactions"), more than $500 an hour ("$10,000/hr of transactions") or
-"smart contract" never skips. In the title a number per hour is pay ("Data Engineer 65/hr W2")."""
+"""Skips contract and hourly-pay jobs. A board that lists the employment type or pay (Dice: "Contract, Third Party",
+"$45 - $55 hourly", kept in `job.extra`) is believed first; a listing that is also full-time is left to the text.
+Then the title and description are read for wording that signals one (for contracts, only while `contract_text` is
+on): a title word like "contract" or "temp", an hourly rate stated in dollars, a fixed-term phrase such as "6-month
+contract", or an explicit "employment type: contract" label. A skip is final, so each rule asks for wording that names
+the arrangement: a bare "1099" (as in "Form 1099 processing"), a product that handles contractors ("independent
+contractor onboarding", "help freelancers work as a contractor"), a number per hour without a currency in the
+description ("10,000/hr transactions"), more than $500 an hour ("$10,000/hr of transactions") or "smart contract"
+never skips. In the title a number per hour is pay ("Data Engineer 65/hr W2")."""
 from __future__ import annotations
 
 import re
@@ -104,6 +106,19 @@ def _pay_rate(matches) -> re.Match | None:
     return None
 
 
+# A board's pay field: "$45 - $55 hourly", "65 - 70 Hourly", "$60/hr". A range with no unit ("$70 - $75") is not read.
+_LISTED_HOURLY_RE = re.compile(rf"(?:\$\s*)?{_NUM}(?:\s*-\s*\$?\s*{_NUM})?(?:\s+hourly\b|{_PER_HOUR})", re.I)
+
+
+def _listed_contract(label: str, contract_to_hire: str) -> bool:
+    """Whether a board's employment type ("Contract, Third Party") marks a contract role. One that is also full-time
+    ("Full-time, Contract") is not decided here."""
+    parts = {part.strip().lower() for part in label.split(",")}
+    if parts & {"full-time", "full time", "fulltime"}:
+        return False
+    return "contract" in parts or ("contract to hire" in parts and contract_to_hire == "exclude")
+
+
 _INTERN_TITLE_TERMS = ("intern", "internship", "co-op", "coop")
 
 
@@ -140,13 +155,19 @@ class EmploymentFilter:
         raw_text = f"{job.title}\n{job.description}".lower()     # the line break: the description opens a sentence
 
         if "contract" in self.s.exclude:
-            match = self._contract_match(title, text, raw_text, (job.title or "").strip())
+            label = str(job.extra.get("employment_type") or "")
+            if label and _listed_contract(label, self.s.contract_to_hire):
+                return skip(f"contract: listed as {label}")
+            match = self.s.contract_text and self._contract_match(title, text, raw_text, (job.title or "").strip())
             if match:
                 return skip(f"contract: {match}")
 
         if "hourly" in self.s.exclude:
             if self.s.hourly_internships == "keep" and any(has_term(title, t) for t in _INTERN_TITLE_TERMS):
                 return KEEP
+            pay = str(job.extra.get("pay") or "")
+            if pay and _pay_rate(_LISTED_HOURLY_RE.finditer(pay)):
+                return skip(f"hourly pay: listed as {pay}")
             m = _pay_rate(_TITLE_HOURLY_RE.finditer(job.title or "")) or _pay_rate(_HOURLY_RE.finditer(raw_text))
             if m:
                 return skip(f"hourly pay: {m.group(0).strip().lower()}")

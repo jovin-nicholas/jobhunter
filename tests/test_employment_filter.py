@@ -7,12 +7,14 @@ from jobhunter.models import Job
 from jobhunter.settings import EmploymentFilterSettings, FilterSettings, KeywordFilterSettings, load_settings
 
 
-def job(title="Software Engineer", description="", company="Acme"):
-    return Job("t_1", title, company, "Austin, TX", "https://example.com/1", description=description)
+def job(title="Software Engineer", description="", company="Acme", employment_type=None, pay=None):
+    extra = {k: v for k, v in (("employment_type", employment_type), ("pay", pay)) if v is not None}
+    return Job("t_1", title, company, "Austin, TX", "https://example.com/1", description=description, extra=extra)
 
 
-def f(exclude=("contract", "hourly"), contract_to_hire="keep", hourly_internships="keep"):
-    return EmploymentFilter(EmploymentFilterSettings(list(exclude), contract_to_hire, hourly_internships))
+def f(exclude=("contract", "hourly"), contract_to_hire="keep", hourly_internships="keep", contract_text=True):
+    return EmploymentFilter(EmploymentFilterSettings(list(exclude), contract_to_hire, hourly_internships,
+                                                     contract_text))
 
 
 class TestContractTitleWords(unittest.TestCase):
@@ -329,6 +331,95 @@ class TestHourlyAmountsThatAreNotPay(unittest.TestCase):
                                      "USD 300 per hour": "usd 300 per hour"}.items():
             with self.subTest(description=description):
                 self.assertEqual(f().check(job(description=description)).reason, f"hourly pay: {snippet}")
+
+
+class TestBoardEmploymentType(unittest.TestCase):
+    """The employment type a board lists (Dice: "Contract, Third Party"), read before the posting text."""
+
+    def test_a_contract_listing_skips(self):
+        for label in ("Contract", "Contract, Third Party", "Third Party, Contract", "CONTRACT",
+                      "Part-time, Contract, Third Party"):
+            with self.subTest(label=label):
+                result = f().check(job(employment_type=label))
+                self.assertFalse(result.keep, label)
+                self.assertEqual(result.reason, f"contract: listed as {label}")
+
+    def test_full_time_and_other_listings_keep(self):
+        for label in ("Full-time", "Full-time, Third Party", "Third Party", "Part-time", ""):
+            with self.subTest(label=label):
+                self.assertTrue(f().check(job(employment_type=label)).keep, label)
+
+    def test_a_listing_that_is_also_full_time_is_left_to_the_text(self):
+        for label in ("Full-time, Contract", "Full-time, Part-time, Contract, Third Party"):
+            with self.subTest(label=label):
+                self.assertTrue(f().check(job(employment_type=label)).keep, label)
+                self.assertFalse(f().check(job(employment_type=label, description="6-month contract")).keep, label)
+
+    def test_contract_to_hire_listings_follow_the_contract_to_hire_setting(self):
+        self.assertTrue(f().check(job(employment_type="Contract to Hire")).keep)
+        result = f(contract_to_hire="exclude").check(job(employment_type="Contract to Hire"))
+        self.assertEqual(result.reason, "contract: listed as Contract to Hire")
+
+    def test_the_listing_is_ignored_when_contracts_are_not_excluded(self):
+        self.assertTrue(f(exclude=("hourly",)).check(job(employment_type="Contract")).keep)
+
+    def test_the_listing_skips_even_when_the_text_is_not_read(self):
+        result = f(contract_text=False).check(job(employment_type="Contract"))
+        self.assertEqual(result.reason, "contract: listed as Contract")
+
+
+class TestContractTextOff(unittest.TestCase):
+    """contract_text: false leaves contracts to the board's listing; the posting text is not read for them."""
+
+    def test_contract_wording_in_the_title_or_text_keeps(self):
+        for title, description in (("Contract Software Engineer", ""), ("Software Engineer - C2C", ""),
+                                   ("Software Engineer", "This is a 6-month contract."),
+                                   ("Software Engineer", "Employment type: Contract")):
+            with self.subTest(title=title, description=description):
+                self.assertTrue(f(contract_text=False).check(job(title, description)).keep)
+
+    def test_contract_to_hire_wording_keeps_too(self):
+        self.assertTrue(f(contract_to_hire="exclude", contract_text=False)
+                        .check(job(description="Contract to hire role.")).keep)
+
+    def test_hourly_pay_in_the_text_still_skips(self):
+        result = f(contract_text=False).check(job(description="Pay: $55/hr"))
+        self.assertEqual(result.reason, "hourly pay: $55/hr")
+
+
+class TestBoardPay(unittest.TestCase):
+    """The pay a board lists (Dice: "$45 - $55 hourly")."""
+
+    def test_hourly_pay_listed_by_the_board_skips(self):
+        for pay in ("$45 - $55 hourly", "$60/hr", "USD 50 per hour", "65 - 70 Hourly"):
+            with self.subTest(pay=pay):
+                result = f().check(job(pay=pay))
+                self.assertFalse(result.keep, pay)
+                self.assertEqual(result.reason, f"hourly pay: listed as {pay}")
+
+    def test_yearly_or_unstated_pay_keeps(self):
+        for pay in ("$120,000 - $150,000 yearly", "$70 - $75", "Depends on Experience", "$1,000 hourly", ""):
+            with self.subTest(pay=pay):
+                self.assertTrue(f().check(job(pay=pay)).keep, pay)
+
+    def test_ignored_when_hourly_is_not_excluded(self):
+        self.assertTrue(f(exclude=("contract",)).check(job(pay="$45 - $55 hourly")).keep)
+
+    def test_hourly_internships_kept_when_asked(self):
+        self.assertTrue(f().check(job("Software Engineering Intern", pay="$40 hourly")).keep)
+
+
+class TestContractTextSetting(unittest.TestCase):
+    def test_defaults_to_reading_the_text(self):
+        self.assertTrue(parse_employment_settings({"exclude": ["contract"]}).contract_text)
+
+    def test_false_parses(self):
+        self.assertFalse(parse_employment_settings({"exclude": ["contract"], "contract_text": False}).contract_text)
+
+    def test_must_be_true_or_false(self):
+        with self.assertRaises(SettingsError) as caught:
+            parse_employment_settings({"exclude": ["contract"], "contract_text": "no"})
+        self.assertTrue(any("contract_text" in p and "true or false" in p for p in caught.exception.problems))
 
 
 if __name__ == "__main__":

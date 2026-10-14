@@ -70,7 +70,10 @@ def _normalize(raw: dict) -> Job:
         source="dice",
         ats="dice",
         description_is_snippet=True,
-        extra={"guid": raw.get("guid")},
+        # Dice lists the employment type ("Contract, Third Party") and pay ("$45 - $55 hourly"); the employment
+        # filter reads them before the posting text.
+        extra={"guid": raw.get("guid"), **{key: raw[field] for key, field in (("employment_type", "employmentType"),
+                                                                              ("pay", "salary")) if raw.get(field)}},
     )
 
 

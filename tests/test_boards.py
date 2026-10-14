@@ -155,6 +155,21 @@ class TestGreenhouse(unittest.TestCase):
 
 
 
+class TestDiceListingFields(unittest.TestCase):
+    def test_employment_type_and_pay_are_kept_for_the_filters(self):
+        raw = dice_job()
+        raw["employmentType"], raw["salary"] = "Contract, Third Party", "$45 - $55 hourly"
+        fake = FakeDice({"search_jobs": lambda a: {"data": [raw]}})
+        job = list(DiceBoard({}).search(ctx(fake)))[0]
+        self.assertEqual((job.extra["employment_type"], job.extra["pay"]), ("Contract, Third Party", "$45 - $55 hourly"))
+
+    def test_missing_fields_are_left_out(self):
+        fake = FakeDice({"search_jobs": lambda a: {"data": [dice_job()]}})
+        job = list(DiceBoard({}).search(ctx(fake)))[0]
+        self.assertNotIn("employment_type", job.extra)
+        self.assertNotIn("pay", job.extra)
+
+
 class TestDiceRemote(unittest.TestCase):
     def test_remote_job_without_a_location_is_remote_us(self):
         raw = dice_job()

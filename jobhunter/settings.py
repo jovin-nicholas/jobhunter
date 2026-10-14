@@ -93,6 +93,7 @@ class EmploymentFilterSettings:
     exclude: list[str]
     contract_to_hire: str = "keep"
     hourly_internships: str = "keep"
+    contract_text: bool = True        # false: contracts only from the board's listing, never from the posting text
 
 
 SYSTEMONE_CHECKS = ("citizenship", "clearance")
@@ -416,7 +417,8 @@ def _filters(c: _Checker, raw: Any) -> FilterSettings:
         )
     if "employment" in raw:
         key = "filters.employment"
-        r = c.mapping(key, raw["employment"], {"exclude", "contract_to_hire", "hourly_internships"})
+        r = c.mapping(key, raw["employment"], {"exclude", "contract_to_hire", "hourly_internships",
+                                                    "contract_text"})
         exclude = c.strings(f"{key}.exclude", r.get("exclude"))
         for value in exclude:
             if value not in EMPLOYMENT_EXCLUDE:
@@ -431,7 +433,11 @@ def _filters(c: _Checker, raw: Any) -> FilterSettings:
         if hourly_internships not in EMPLOYMENT_TOGGLE:
             c.add(f"{key}.hourly_internships", f"expected keep or exclude, got {hourly_internships!r}")
             hourly_internships = "keep"
-        out.employment = EmploymentFilterSettings(exclude, contract_to_hire, hourly_internships)
+        contract_text = r.get("contract_text", True)
+        if not isinstance(contract_text, bool):
+            c.add(f"{key}.contract_text", f"expected true or false, got {contract_text!r}")
+            contract_text = True
+        out.employment = EmploymentFilterSettings(exclude, contract_to_hire, hourly_internships, contract_text)
     if "systemone" in raw:
         key = "filters.systemone"
         r = c.mapping(key, raw["systemone"], {"model", "url", "timeout_s", "skip_if"})

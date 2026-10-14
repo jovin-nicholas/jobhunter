@@ -78,9 +78,10 @@ All optional; they run in this order before any model.
 | `keywords.exclude_phrases` | Skip when the title or description contains any of these phrases |
 | `keywords.exclude_companies` | Skip these companies |
 | `keywords.exclude_roles` | Groups `{terms: [...], min_matches: N}`: skip when N different terms of a group appear |
-| `employment.exclude` | `[contract, hourly]`: either or both, required. No board reports employment type, so this reads the title and description for contract or hourly-pay wording instead |
+| `employment.exclude` | `[contract, hourly]`: either or both, required. Reads the employment type and pay a board lists (Dice) first, then the title and description for contract or hourly-pay wording |
 | `employment.contract_to_hire` | `keep` (default) or `exclude`: whether "contract to hire", "cth" and "temp to perm"/"temp to hire" wording skips a job on their own |
 | `employment.hourly_internships` | `keep` (default) or `exclude`: whether an hourly rate skips a job whose title says intern, internship or co-op |
+| `employment.contract_text` | `true` (default) or `false`: whether contract wording in the title or description skips a job. With `false`, only a board's listed employment type does; hourly pay is still read from the text |
 | `systemone` | Off unless set. `{model: nimble:9b-q4_K_M}` (also `url`, `timeout_s: 30`, `skip_if: []`): a local System One model (Ollama 0.35+). See below. |
 
 Matching is whole-word and case-insensitive. `employment` reads:

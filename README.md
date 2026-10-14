@@ -98,7 +98,8 @@ Under `filters:` in `jobhunter.yaml` (every option is in [docs/settings.md](docs
   systemone: {model: "nimble:9b-q4_K_M", skip_if: [citizenship, clearance]}   # skip_if is optional
   ```
 
-- **Contract and hourly jobs** are recognised from the title and description, since no board reports employment type:
+- **Contract and hourly jobs** are recognised from the employment type and pay Dice lists ("Contract, Third Party",
+  "$45 - $55 hourly"; a listing that is also full-time is left to the text), then from the title and description:
   "contract" or "freelance" in the title, wording such as "C2C", "W2 only", "6-month contract" or "you will be paid on
   a 1099 basis", and a dollar rate such as "$55/hr". A product that handles contracts or 1099s ("smart contracts",
   "Form 1099 processing") does not count. A skipped job is saved as `filtered` with the matched words as its reason.
@@ -108,6 +109,7 @@ Under `filters:` in `jobhunter.yaml` (every option is in [docs/settings.md](docs
     exclude: [contract, hourly]   # either or both
     contract_to_hire: keep        # or exclude
     hourly_internships: keep      # or exclude
+    contract_text: true           # false: contracts only from the board's listing, not the posting text
   ```
 
 ## Boards
