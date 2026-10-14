@@ -49,7 +49,7 @@ tr.row:hover td { background: var(--raised); }
 tr.row.focus td { background: var(--accent-soft); }
 tr.closed td { color: var(--muted); }
 .dot { width: 110px; } .company { width: 22%; } .stage { width: 90px; } .age { width: 70px; text-align: right; }
-.fit { width: 70px; } .board { width: 110px; color: var(--muted); } .acts { width: 230px; }
+.fit { width: 70px; } .when { width: 120px; text-align: right; } .kind { width: 90px; color: var(--muted); } .board { width: 110px; color: var(--muted); } .acts { width: 230px; }
 .acts-row { display: flex; gap: 8px; justify-content: flex-end; }
 a.title-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
 a.title-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
@@ -109,7 +109,8 @@ pre.jd { white-space: pre-wrap; font: 13px/1.5 var(--sans); background: var(--pa
     </div>
     <input id="search" type="search" aria-label="Search applications" placeholder="Search company, title, notes" hidden>
     <button class="link" id="search-open" type="button" title="Search (⌘K)">search</button>
-    <button class="link" id="view-list" type="button">list</button>
+    <button class="link" id="view-apps" type="button">applications</button>
+    <button class="link" id="view-alerts" type="button">alerts <span class="num" id="alerts-count"></span></button>
     <button class="link" id="view-numbers" type="button">numbers</button>
     <a class="link" id="export" download="applications.csv">export</a>
     <button class="link" id="help-open" type="button" aria-label="Keyboard shortcuts">?</button>
@@ -128,8 +129,8 @@ pre.jd { white-space: pre-wrap; font: 13px/1.5 var(--sans); background: var(--pa
       <dt><kbd>s</kbd> <kbd>i</kbd> <kbd>o</kbd></dt><dd>screen, interview, offer</dd>
       <dt><kbd>r</kbd> <kbd>w</kbd> <kbd>g</kbd></dt><dd>rejected, withdrawn, ghosted</dd>
       <dt><kbd>n</kbd> <kbd>f</kbd> <kbd>d</kbd></dt><dd>notes, set follow-up, follow-up done</dd>
-      <dt><kbd>a</kbd> <kbd>b</kbd> <kbd>x</kbd></dt><dd>to review: applied, bad match, hide</dd>
-      <dt><kbd>v</kbd></dt><dd>list or numbers</dd>
+      <dt><kbd>a</kbd> <kbd>b</kbd> <kbd>x</kbd></dt><dd>alerts: applied, bad match, hide</dd>
+      <dt><kbd>v</kbd></dt><dd>applications, alerts, numbers</dd>
       <dt><kbd>⌘K</kbd> / <kbd>Ctrl K</kbd></dt><dd>search</dd>
     </dl>
   </div>
@@ -146,7 +147,9 @@ const TOKEN = (() => {
 })();
 const STAGE_KEYS = {s: "screen", i: "interview", o: "offer", r: "rejected", w: "withdrawn", g: "ghosted"};
 const KEY_OF = Object.fromEntries(Object.entries(STAGE_KEYS).map(([k, s]) => [s, k]));
-let state = null, view = "list", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
+const VIEWS = ["apps", "alerts", "numbers"];
+let state = null, view = "apps", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
+let showDismissed = false;
 let visible = [];          // rows j/k move through: {type: "app", id} or {type: "review", job_id}
 let toastTimer = null;
 
@@ -184,7 +187,27 @@ async function refresh() {
 function showNotice(text) { document.getElementById("main").replaceChildren(el("p", {class: "notice"}, text)); }
 
 function daysBetween(fromIso, toIso) { return Math.round((Date.parse(toIso.slice(0, 10)) - Date.parse(fromIso.slice(0, 10))) / 86400000); }
-function ago(days) { return days <= 0 ? "today" : `${days}d`; }
+// A time for today ("2:15 PM"), the weekday and time within the week ("Mon 2:15 PM"), else the date ("Oct 3").
+function when(iso) {
+  const t = new Date(iso), now = new Date();
+  if (isNaN(t)) return "";
+  const time = t.toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"});
+  if (t.toDateString() === now.toDateString()) return time;
+  if (now - t < 6 * 86400000) return `${t.toLocaleDateString(undefined, {weekday: "short"})} ${time}`;
+  return t.toLocaleDateString(undefined, {month: "short", day: "numeric"});
+}
+function localDay(iso) {
+  const t = new Date(iso);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+}
+function whenFull(iso) { const t = new Date(iso); return isNaN(t) ? "" : t.toLocaleString(); }
+// An application's age: days since its last activity, or, for activity today, the time it was entered.
+function appAge(a) {
+  if (a.age_days > 0) return `${a.age_days}d`;
+  const today = a.events.filter(e => e.at === state.today && e.created_at).map(e => e.created_at).sort();
+  const at = today.length ? today[today.length - 1] : a.created_at;
+  return at && new Date(at).toDateString() === new Date().toDateString() ? when(at) : "today";
+}
 function until(iso) {
   const d = daysBetween(state.today, iso);
   return d < 0 ? `${-d}d late` : d === 0 ? "today" : d === 1 ? "tmrw" : `in ${d}d`;
@@ -205,11 +228,11 @@ function matchesReview(r) {
 function render() {
   if (!state) return;
   renderPipeline();
-  document.getElementById("view-list").classList.toggle("on", view === "list");
-  document.getElementById("view-numbers").classList.toggle("on", view === "numbers");
+  for (const v of VIEWS) document.getElementById(`view-${v}`).classList.toggle("on", view === v);
+  document.getElementById("alerts-count").textContent = state.review.length || "";
   document.getElementById("export").setAttribute("href", `/api/export.csv?t=${encodeURIComponent(TOKEN || "")}`);
   const main = document.getElementById("main");
-  main.replaceChildren(...(view === "numbers" ? renderNumbers() : renderList()));
+  main.replaceChildren(...(view === "numbers" ? renderNumbers() : view === "alerts" ? renderAlerts() : renderApps()));
   markCursor();
   renderDrawer();
 }
@@ -217,7 +240,7 @@ function renderPipeline() {
   const open = state.open_stages, closed = state.closed_stages, counts = state.counts;
   const total = open.reduce((sum, s) => sum + counts[s], 0);
   const button = s => el("button", {type: "button", class: stageFilter === s ? "on" : "",
-    on: {click: () => { stageFilter = stageFilter === s ? null : s; view = "list"; render(); }}},
+    on: {click: () => { stageFilter = stageFilter === s ? null : s; view = "apps"; render(); }}},
     `${s} `, el("span", {class: "num"}, counts[s]));
   document.getElementById("pipeline").replaceChildren(
     ...open.flatMap((s, i) => i < open.length - 1 ? [button(s), el("span", {"aria-hidden": "true"}, "▸")] : [button(s)]),
@@ -240,7 +263,7 @@ function titleCell(title, url) {
                   title: "Open the posting", on: {click: e => e.stopPropagation()}}, title || "—");
 }
 function appRow(a) {
-  const due = a.due ? until(a.due) : ago(a.age_days);
+  const due = a.due ? until(a.due) : appAge(a);
   return el("tr", {class: `row${state.closed_stages.includes(a.stage) ? " closed" : ""}`, "data-key": `app:${a.id}`,
                    on: {click: () => { cursor = visible.findIndex(v => v.type === "app" && v.id === a.id); openDrawer(a.id); }}},
     el("td", {class: "dot"}, el("span", {class: a.reason ? "mark on" : "mark", "aria-hidden": "true"}),
@@ -259,7 +282,7 @@ function reviewRow(r) {
                    on: {click: () => { cursor = visible.findIndex(v => v.type === "review" && v.job_id === r.job_id); markCursor(); }}},
     el("td", {class: "company"}, r.company || "—"),
     el("td", {class: "title", title: r.title}, titleCell(r.title, r.url)),
-    el("td", {class: "age num"}, ago(daysBetween(r.alerted_at, state.today))),
+    el("td", {class: "when num", title: whenFull(r.alerted_at)}, when(r.alerted_at)),
     el("td", {class: "fit num"}, fitCell(r)),
     el("td", {class: "acts"}, el("div", {class: "acts-row"},
        act("applied", "a", "applied"), act("bad match", "b", "bad"), act("hide", "x", "hide"))));
@@ -272,13 +295,10 @@ function group(title, apps, opts = {}) {
                                        ["age", "age"], ["fit", "fit"], ["board", "board"]),
                    el("tbody", {}, apps.map(appRow)))];
 }
-function renderList() {
+function renderApps() {
   const g = state.groups;
   const needs = g.needs.filter(matches), waiting = g.waiting.filter(matches), closed = g.closed.filter(matches);
-  const review = stageFilter ? [] : state.review.filter(matchesReview);    // a stage filter is about applications
-  visible = [...needs, ...waiting, ...(showClosed ? closed : [])].map(a => ({type: "app", id: a.id}))
-    .concat(review.map(r => ({type: "review", job_id: r.job_id})));
-  const nothing = !allApps().length;
+  visible = [...needs, ...waiting, ...(showClosed ? closed : [])].map(a => ({type: "app", id: a.id}));
   const closedToggle = el("button", {type: "button", class: "link", on: {click: () => { showClosed = !showClosed; render(); }}},
                           showClosed ? "hide" : "show");
   const parts = [
@@ -286,17 +306,43 @@ function renderList() {
     ...group("waiting", waiting),
     ...(closed.length ? group("closed", closed, {collapsed: !showClosed, toggle: closedToggle}) : []),
   ];
-  if (!stageFilter && (review.length || !query)) {
-    parts.push(el("h2", {}, "to review · ", el("span", {class: "count"}, review.length),
-                  query ? " matching alerts" : ` alerts from the last ${state.settings.review_days} days`));
-    parts.push(review.length
-      ? el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "age"], ["fit", "fit"], ["", "acts"]),
-           el("tbody", {}, review.map(reviewRow)))
-      : el("p", {class: "empty"}, "No recent alerts to review."));
-    if (nothing && !query) parts.unshift(el("p", {class: "empty"}, "Mark the alerts you applied to with “applied” below, "
-                                            + "or add one with the Add box above."));
-  }
+  if (!allApps().length && !query) parts.push(el("p", {class: "empty"}, "No applications yet. Mark the alerts you applied to "
+                                                 + "with “applied” on the alerts page, or add one with the Add box above."));
   if (query && !visible.length) parts.push(el("p", {class: "empty"}, `No matches for “${query}”.`));
+  return parts;
+}
+function dismissedRow(r) {
+  const restoreButton = el("button", {type: "button", title: "Put it back in the alerts to review",
+                                      on: {click: e => { e.stopPropagation(); restore(r); }}}, "restore");
+  return el("tr", {class: "row closed", "data-key": `dismissed:${r.job_id}`},
+    el("td", {class: "company"}, r.company || "—"),
+    el("td", {class: "title", title: r.title}, titleCell(r.title, r.url)),
+    el("td", {class: "when num", title: whenFull(r.alerted_at)}, when(r.alerted_at)),
+    el("td", {class: "fit num"}, fitCell(r)),
+    el("td", {class: "kind", title: whenFull(r.at)}, r.kind === "bad" ? "bad match" : "hidden"),
+    el("td", {class: "acts"}, el("div", {class: "acts-row"},
+       r.kind === "hidden" || r.message_id ? restoreButton
+         : el("span", {class: "reason", title: "Marked from an alert email; change it with that email's buttons"}, "from email"))));
+}
+function renderAlerts() {
+  const review = state.review.filter(matchesReview), dismissed = state.dismissed.filter(matchesReview);
+  visible = review.map(r => ({type: "review", job_id: r.job_id}));
+  const parts = [el("h2", {}, "to review · ", el("span", {class: "count"}, review.length),
+                    query ? " matching alerts" : ` alerts from the last ${state.settings.review_days} days`)];
+  parts.push(review.length
+    ? el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "when"], ["fit", "fit"], ["", "acts"]),
+         el("tbody", {}, review.map(reviewRow)))
+    : el("p", {class: "empty"}, query ? `No alerts match “${query}”.` : "No recent alerts to review."));
+  const toggle = el("button", {type: "button", class: "link", on: {click: () => { showDismissed = !showDismissed; render(); }}},
+                    showDismissed ? "hide" : "show");
+  parts.push(el("h2", {}, "bad match and hidden · ", el("span", {class: "count"}, dismissed.length), dismissed.length ? toggle : null));
+  if (showDismissed && dismissed.length) {
+    parts.push(el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "when"], ["fit", "fit"],
+                                      ["marked", "kind"], ["", "acts"]),
+                  el("tbody", {}, dismissed.map(dismissedRow))));
+  } else if (!dismissed.length) {
+    parts.push(el("p", {class: "empty"}, "Alerts you mark a bad match or hide show up here, and can be restored."));
+  }
   return parts;
 }
 function renderNumbers() {
@@ -344,7 +390,8 @@ function renderDrawer() {
     el("label", {class: "field"}, "People", editable(a, "people", "", "Jane at Acme, recruiter")),
     el("label", {class: "field"}, "Notes", editable(a, "notes", "", "", "textarea")),
     el("ol", {class: "timeline", reversed: true}, [...a.events].reverse().map(e => el("li", {},
-      el("time", {datetime: e.at}, fmt(e.at)),
+      el("time", {datetime: e.at}, fmt(e.at) + (e.created_at && localDay(e.created_at) === e.at
+                                                ? `, ${new Date(e.created_at).toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"})}` : "")),
       e.kind === "stage" ? e.value : e.kind === "follow_up_set" ? `follow up on ${fmt(e.value)}` : "follow-up done"))),
     a.job_id ? el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showDescription(a.id, e.target)}}, "Show job description")) : null,
     el("button", {type: "button", class: "danger", on: {click: e => deleteApplication(a.id, e.currentTarget)}}, "Delete application")));
@@ -407,6 +454,13 @@ async function review(jobId, action) {
           () => api("POST", "/api/review/undo", undo));
   } catch (e) { toast(`Failed: ${e.message}`); }
 }
+// Back to the alerts to review: a hidden alert is unhidden, a bad match made here loses its label.
+async function restore(r) {
+  try {
+    await api("POST", "/api/review/undo", r.kind === "hidden" ? {job_id: r.job_id} : {message_id: r.message_id});
+    await refresh(); toast("Restored to the alerts to review");
+  } catch (e) { toast(`Not restored: ${e.message}`); }
+}
 function toast(message, undo) {
   const box = document.getElementById("toast");
   clearTimeout(toastTimer);
@@ -454,8 +508,7 @@ document.getElementById("search-open").addEventListener("click", () => {
   search.hidden = false; search.focus();
 });
 document.getElementById("search").addEventListener("input", e => { query = e.target.value.trim(); render(); });
-document.getElementById("view-list").addEventListener("click", () => { view = "list"; render(); });
-document.getElementById("view-numbers").addEventListener("click", () => { view = "numbers"; render(); });
+for (const v of VIEWS) document.getElementById(`view-${v}`).addEventListener("click", () => { view = v; render(); });
 document.getElementById("help-open").addEventListener("click", () => { document.getElementById("help").hidden = false; });
 document.getElementById("help").addEventListener("click", () => { document.getElementById("help").hidden = true; });
 window.addEventListener("popstate", () => { if (openId !== null) { openId = null; render(); } });
@@ -479,7 +532,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "j" || e.key === "k") { cursor += e.key === "j" ? 1 : -1; markCursor(); return; }
   if (e.key === "Enter" && v && v.type === "app") { openDrawer(v.id); return; }
   if (e.key === "?") { document.getElementById("help").hidden = false; return; }
-  if (e.key === "v") { view = view === "list" ? "numbers" : "list"; render(); return; }
+  if (e.key === "v") { view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]; render(); return; }
   if ("abx".includes(e.key) && v && v.type === "review") { review(v.job_id, {a: "applied", b: "bad", x: "hide"}[e.key]); return; }
   if (e.key === "n") { e.preventDefault(); focusField("field-notes"); return; }
   if (e.key === "f") { e.preventDefault(); focusField("follow-up"); return; }

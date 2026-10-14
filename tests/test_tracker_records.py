@@ -213,6 +213,49 @@ class TestReviewQueue(unittest.TestCase):
             self.apps.record_verdict("dice_3", "maybe later")
 
 
+class TestDismissed(unittest.TestCase):
+    """Alerts marked a bad match or hidden, so the alerts page can list them and bring them back."""
+
+    def setUp(self):
+        self.store = new_store()
+        self.apps = Applications(self.store)
+        for i, name in enumerate(("Acme", "Globex", "Initech", "Hooli")):
+            self.store.save(Job(f"dice_{i}", "Software Engineer", name, "Remote", f"https://e.example/{i}",
+                                source="dice"), "notified")
+
+    def test_bad_matches_and_hidden_alerts_newest_first_with_what_undo_needs(self):
+        hidden_first = self.apps.hide_from_review("dice_0")
+        message_id = self.apps.record_verdict("dice_1", "bad")
+        rows = self.apps.dismissed(14)
+        self.assertEqual([(r["job_id"], r["kind"]) for r in rows], [("dice_1", "bad"), ("dice_0", "hidden")])
+        self.assertEqual((rows[0]["message_id"], rows[1]["message_id"]), (message_id, None))
+        self.assertEqual((rows[0]["company"], rows[0]["url"]), ("Globex", "https://e.example/1"))
+        self.assertTrue(rows[0]["at"] >= rows[1]["at"])
+        self.assertTrue(rows[0]["alerted_at"])
+
+    def test_a_bad_match_from_an_email_is_listed_but_has_no_tracker_label_to_undo(self):
+        self.store.add_feedback([{"job_id": "dice_2", "verdict": "bad", "received_at": "2026-10-05T10:00:00+00:00",
+                                  "message_id": "<m1@mail.example.com>"}])
+        [row] = self.apps.dismissed(14, now=datetime(2026, 10, 6, tzinfo=timezone.utc))
+        self.assertEqual((row["job_id"], row["kind"], row["message_id"]), ("dice_2", "bad", None))
+
+    def test_restored_applied_or_relabelled_alerts_leave_the_list(self):
+        self.apps.hide_from_review("dice_0")
+        self.apps.unhide("dice_0")
+        self.apps.delete_verdict(self.apps.record_verdict("dice_1", "bad"))
+        self.apps.record_verdict("dice_2", "bad")
+        self.store.add_feedback([{"job_id": "dice_2", "verdict": "good", "received_at": "2099-01-01T00:00:00+00:00",
+                                  "message_id": "<m2@mail.example.com>"}])
+        self.apps.hide_from_review("dice_3")
+        self.apps.add_from_job("dice_3", "2026-10-01")
+        self.assertEqual(self.apps.dismissed(14), [])
+
+    def test_old_alerts_are_left_out(self):
+        self.apps.hide_from_review("dice_0")
+        later = datetime.now(timezone.utc) + timedelta(days=15)
+        self.assertEqual(self.apps.dismissed(14, now=later), [])
+
+
 class TestVerdictUndo(unittest.TestCase):
     def test_only_a_tracker_label_can_be_deleted(self):
         store = new_store()

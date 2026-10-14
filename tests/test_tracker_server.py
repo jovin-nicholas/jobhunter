@@ -124,6 +124,15 @@ class TestApi(ServerTestCase):
         self.assertEqual(state["review"], [])
         self.assertEqual(self.call("POST", "/api/review", {"job_id": "dice_1", "action": "maybe"})[0], 400)
 
+    def test_the_state_lists_dismissed_alerts_and_restoring_brings_them_back(self):
+        self.call("POST", "/api/review", {"job_id": "dice_1", "action": "hide"})
+        state = json.loads(self.call("GET", "/api/state")[2])
+        self.assertEqual([(r["job_id"], r["kind"]) for r in state["dismissed"]], [("dice_1", "hidden")])
+        self.assertEqual(state["review"], [])
+        self.call("POST", "/api/review/undo", {"job_id": "dice_1"})
+        state = json.loads(self.call("GET", "/api/state")[2])
+        self.assertEqual((state["dismissed"], [r["job_id"] for r in state["review"]]), ([], ["dice_1"]))
+
     def test_a_date_out_of_range_is_a_400(self):
         app_id = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
         for path, body in ((f"/api/applications/{app_id}", {"applied_at": "0002-10-06"}),

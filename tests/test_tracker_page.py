@@ -93,6 +93,22 @@ class TestPage(unittest.TestCase):
         self.assertIn("state.review.filter(matchesReview)", self.text)
         self.assertIn("No matches for", self.text)
 
+    def test_applications_and_alerts_are_separate_pages(self):
+        for view in ('id="view-apps"', 'id="view-alerts"', 'id="view-numbers"'):
+            self.assertIn(view, self.text)
+        self.assertIn('view === "alerts" ? renderAlerts()', self.text)
+        self.assertNotIn("state.review", self.text.split("function renderApps()")[1].split("function renderAlerts()")[0])
+
+    def test_bad_matches_and_hidden_alerts_can_be_seen_and_restored(self):
+        self.assertIn("state.dismissed", self.text)
+        self.assertIn('"restore"', self.text)
+        self.assertIn('"/api/review/undo"', self.text.split("async function restore(")[1].split("\n}")[0])
+
+    def test_times_are_shown_instead_of_today(self):
+        self.assertNotIn('"today" : `${days}d`', self.text)
+        self.assertIn("function when(iso)", self.text)
+        self.assertIn("when(r.alerted_at)", self.text)
+
     def test_a_duplicate_add_says_already_tracked(self):
         self.assertIn("Already tracked", self.text)
 

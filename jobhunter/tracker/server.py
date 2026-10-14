@@ -152,7 +152,8 @@ class _Handler(BaseHTTPRequestHandler):
         apps, settings, today = self.server.apps, self.server.settings, self.server.today()
         m = _APP_PATH.fullmatch(path)
         if method == "GET" and path == "/api/state":
-            return self._json(200, build_state(apps.all(), apps.review_queue(settings.review_days), settings, today))
+            return self._json(200, build_state(apps.all(), apps.review_queue(settings.review_days), settings, today,
+                                               apps.dismissed(settings.review_days)))
         if method == "GET" and path == "/api/export.csv":
             return self._send(200, export_csv(apps.all()).encode(), "text/csv; charset=utf-8",
                               {"Content-Disposition": 'attachment; filename="applications.csv"'})

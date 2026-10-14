@@ -319,6 +319,32 @@ class Applications:
                  "alerted_at": at, **fit_fields(score, label, model, scales)}
                 for i, t, c, u, b, label, score, at, model in rows]
 
+    def dismissed(self, days: int, now: datetime | None = None) -> list[dict]:
+        """Notified jobs from the last `days` taken off the review queue without applying: the latest verdict is bad
+        (`kind` "bad", from the tracker or an email) or the job was hidden ("hidden"). Newest dismissal first. A
+        tracker label carries its `message_id`, which restoring passes to undo; an email's label carries None."""
+        cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).isoformat()
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT j.id, j.title, j.company, j.url, j.source, j.score_label, j.match_score, j.run_at, "
+                "j.source_model, f.verdict, f.received_at, f.message_id, h.hidden_at FROM jobs j "
+                "LEFT JOIN feedback f ON f.id = (SELECT g.id FROM feedback g WHERE g.job_id = j.id "
+                "ORDER BY g.received_at DESC, g.id DESC LIMIT 1) "
+                "LEFT JOIN review_hidden h ON h.job_id = j.id "
+                "WHERE j.status = 'notified' AND j.run_at >= ? "
+                "AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id) "
+                "AND (f.verdict = 'bad' OR h.job_id IS NOT NULL) LIMIT 500", (cutoff,)).fetchall()
+        scales = load_scales(self.store.path.parent)
+        out = []
+        for i, t, c, u, b, label, score, alerted, model, verdict, received, message_id, hidden_at in rows:
+            bad = verdict == "bad"
+            out.append({"job_id": i, "title": t or "", "company": c or "", "url": safe_url(u or ""), "board": b or "",
+                        "alerted_at": alerted, "kind": "bad" if bad else "hidden",
+                        "at": max(x for x in ((received if bad else None), hidden_at) if x),
+                        "message_id": message_id if bad and str(message_id).startswith("tracker:") else None,
+                        **fit_fields(score, label, model, scales)})
+        return sorted(out, key=lambda r: (r["at"], r["job_id"]), reverse=True)
+
     def hide_from_review(self, job_id: str) -> None:
         with self.store.connect() as conn:
             conn.execute("INSERT OR IGNORE INTO review_hidden (job_id, hidden_at) VALUES (?, ?)", (job_id, now_iso()))

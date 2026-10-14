@@ -69,7 +69,8 @@ def follow_up_for(stage: str, at: date, settings: TrackerSettings) -> str | None
     return (at + timedelta(days=days)).isoformat() if days else None
 
 
-def build_state(apps: list[dict], review: list[dict], settings: TrackerSettings, today: date) -> dict:
+def build_state(apps: list[dict], review: list[dict], settings: TrackerSettings, today: date,
+                dismissed: list[dict] | None = None) -> dict:
     needs, waiting, closed = [], [], []
     for app in apps:
         row = {**app, "age_days": max(0, (today - last_activity(app)).days)}
@@ -88,5 +89,5 @@ def build_state(apps: list[dict], review: list[dict], settings: TrackerSettings,
     for app in apps:
         counts[app["stage"]] += 1
     return {"today": today.isoformat(), "groups": {"needs": needs, "waiting": waiting, "closed": closed},
-            "review": review, "counts": counts, "numbers": reply_numbers(apps), "stages": list(STAGES),
+            "review": review, "dismissed": dismissed or [], "counts": counts, "numbers": reply_numbers(apps), "stages": list(STAGES),
             "open_stages": list(OPEN_STAGES), "closed_stages": list(CLOSED_STAGES), "settings": asdict(settings)}
