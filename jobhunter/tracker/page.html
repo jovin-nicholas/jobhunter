@@ -33,7 +33,9 @@ header { position: sticky; top: 0; background: var(--paper); border-bottom: 1px 
 .pipeline { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; color: var(--muted); font-size: 13px; }
 .pipeline button { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; }
 .pipeline button.on { color: var(--ink); text-decoration: underline; }
-.pipeline .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.tabs { display: flex; gap: 6px; margin: 14px 0 4px; }
+.tabs button { border: 1px solid var(--rule); background: var(--raised); border-radius: 6px; padding: 4px 12px; cursor: pointer; color: var(--muted); }
+.tabs button.on { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
 .pipeline[hidden], .strip[hidden] { display: none; }
 .strip { display: flex; height: 6px; margin-top: 6px; border-radius: 3px; overflow: hidden; background: var(--rule); }
 .strip span { background: var(--accent); opacity: .85; }
@@ -150,8 +152,8 @@ const TOKEN = (() => {
 const STAGE_KEYS = {s: "screen", i: "interview", o: "offer", r: "rejected", w: "withdrawn", g: "ghosted"};
 const KEY_OF = Object.fromEntries(Object.entries(STAGE_KEYS).map(([k, s]) => [s, k]));
 const VIEWS = ["apps", "alerts", "numbers"];
-let state = null, view = "apps", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
-let showDismissed = false;
+let state = null, view = "apps", cursor = 0, openId = null, query = "", showClosed = false;
+let alertsTab = "review";      // alerts page: "review" or "dismissed"
 let visible = [];          // rows j/k move through: {type: "app", id} or {type: "review", job_id}
 let toastTimer = null;
 
@@ -218,7 +220,6 @@ function fmt(iso) { return new Date(iso.slice(0, 10) + "T12:00:00").toLocaleDate
 function allApps() { return state ? [...state.groups.needs, ...state.groups.waiting, ...state.groups.closed] : []; }
 function findApp(id) { return allApps().find(a => a.id === id) || null; }
 function matches(a) {
-  if (stageFilter && a.stage !== stageFilter) return false;
   if (!query) return true;
   const q = query.toLowerCase();
   return [a.company, a.title, a.notes, a.people].some(v => (v || "").toLowerCase().includes(q));
@@ -241,14 +242,12 @@ function render() {
 function renderPipeline() {
   const open = state.open_stages, closed = state.closed_stages, counts = state.counts;
   const total = open.reduce((sum, s) => sum + counts[s], 0);
-  const button = s => el("button", {type: "button", class: stageFilter === s ? "on" : "",
-    on: {click: () => { stageFilter = stageFilter === s ? null : s; view = "apps"; render(); }}},
-    `${s} `, el("span", {class: "num"}, counts[s]));
-  // The stage row filters applications, so it shows only on that page: next to the "applications" link, its
-  // "applied" read like a second button for the same thing.
+  // Counts only: a stage filter here repeated the applications link ("applied" showed the same list).
+  const button = s => el("span", {}, `${s} `, el("span", {class: "num"}, counts[s]));
+  // The stage counts are about applications, so they show only on that page.
   const pipeline = document.getElementById("pipeline"), strip = document.getElementById("strip");
   pipeline.hidden = strip.hidden = view !== "apps";
-  pipeline.replaceChildren(el("span", {class: "label"}, "filter by stage"),
+  pipeline.replaceChildren(
     ...open.flatMap((s, i) => i < open.length - 1 ? [button(s), el("span", {"aria-hidden": "true"}, "▸")] : [button(s)]),
     el("span", {style: "margin-left:auto"}), ...closed.map(button));
   document.getElementById("strip").replaceChildren(
@@ -330,25 +329,30 @@ function dismissedRow(r) {
        r.kind === "hidden" || r.message_id ? restoreButton
          : el("span", {class: "reason", title: "Marked from an alert email; change it with that email's buttons"}, "from email"))));
 }
+// Two tabs at the top: the alerts to review, and the ones marked a bad match or hidden (restorable). Below 200
+// review rows a second list would be missed.
 function renderAlerts() {
   const review = state.review.filter(matchesReview), dismissed = state.dismissed.filter(matchesReview);
+  const tab = (key, label, n) => el("button", {type: "button", class: alertsTab === key ? "on" : "",
+    on: {click: () => { alertsTab = key; cursor = 0; render(); }}}, `${label} `, el("span", {class: "num"}, n));
+  const parts = [el("div", {class: "tabs", id: "alerts-tabs", role: "tablist"},
+                    tab("review", "to review", review.length), tab("dismissed", "bad match and hidden", dismissed.length))];
+  if (alertsTab === "dismissed") {
+    visible = [];
+    parts.push(dismissed.length
+      ? el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "when"], ["fit", "fit"],
+                               ["marked", "kind"], ["", "acts"]),
+           el("tbody", {}, dismissed.map(dismissedRow)))
+      : el("p", {class: "empty"}, query ? `No bad matches or hidden alerts match “${query}”.`
+                                        : "Alerts you mark a bad match or hide show up here, and can be restored."));
+    return parts;
+  }
   visible = review.map(r => ({type: "review", job_id: r.job_id}));
-  const parts = [el("h2", {}, "to review · ", el("span", {class: "count"}, review.length),
-                    query ? " matching alerts" : ` alerts from the last ${state.settings.review_days} days`)];
+  parts.push(el("p", {class: "empty"}, query ? "Alerts matching your search." : `Alerts from the last ${state.settings.review_days} days.`));
   parts.push(review.length
     ? el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "when"], ["fit", "fit"], ["", "acts"]),
          el("tbody", {}, review.map(reviewRow)))
     : el("p", {class: "empty"}, query ? `No alerts match “${query}”.` : "No recent alerts to review."));
-  const toggle = el("button", {type: "button", class: "link", on: {click: () => { showDismissed = !showDismissed; render(); }}},
-                    showDismissed ? "hide" : "show");
-  parts.push(el("h2", {}, "bad match and hidden · ", el("span", {class: "count"}, dismissed.length), dismissed.length ? toggle : null));
-  if (showDismissed && dismissed.length) {
-    parts.push(el("table", {}, header(["company", "company"], ["title", "title"], ["alerted", "when"], ["fit", "fit"],
-                                      ["marked", "kind"], ["", "acts"]),
-                  el("tbody", {}, dismissed.map(dismissedRow))));
-  } else if (!dismissed.length) {
-    parts.push(el("p", {class: "empty"}, "Alerts you mark a bad match or hide show up here, and can be restored."));
-  }
   return parts;
 }
 function renderNumbers() {

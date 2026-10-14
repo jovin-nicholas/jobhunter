@@ -99,9 +99,16 @@ class TestPage(unittest.TestCase):
         self.assertIn('view === "alerts" ? renderAlerts()', self.text)
         self.assertNotIn("state.review", self.text.split("function renderApps()")[1].split("function renderAlerts()")[0])
 
-    def test_the_stage_row_is_a_labelled_filter_shown_only_on_the_applications_page(self):
+    def test_the_stage_row_is_counts_not_a_second_filter_and_only_on_the_applications_page(self):
+        # "applied" as a filter repeated the applications link next to it, so the stage row only counts.
         self.assertIn('pipeline.hidden = strip.hidden = view !== "apps"', self.text)
-        self.assertIn('"filter by stage"', self.text)
+        self.assertNotIn("stageFilter", self.text)
+        self.assertNotIn('"filter by stage"', self.text)
+
+    def test_bad_matches_and_hidden_are_a_tab_at_the_top_of_the_alerts_page(self):
+        self.assertIn('id: "alerts-tabs"', self.text.split("function renderAlerts()")[1].split("\nfunction ")[0])
+        self.assertIn('alertsTab === "dismissed"', self.text)
+        self.assertNotIn("showDismissed", self.text)
 
     def test_bad_matches_and_hidden_alerts_can_be_seen_and_restored(self):
         self.assertIn("state.dismissed", self.text)
