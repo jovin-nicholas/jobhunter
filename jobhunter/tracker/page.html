@@ -33,6 +33,8 @@ header { position: sticky; top: 0; background: var(--paper); border-bottom: 1px 
 .pipeline { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; color: var(--muted); font-size: 13px; }
 .pipeline button { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; }
 .pipeline button.on { color: var(--ink); text-decoration: underline; }
+.pipeline .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.pipeline[hidden], .strip[hidden] { display: none; }
 .strip { display: flex; height: 6px; margin-top: 6px; border-radius: 3px; overflow: hidden; background: var(--rule); }
 .strip span { background: var(--accent); opacity: .85; }
 .strip span + span { border-left: 2px solid var(--paper); }
@@ -242,7 +244,11 @@ function renderPipeline() {
   const button = s => el("button", {type: "button", class: stageFilter === s ? "on" : "",
     on: {click: () => { stageFilter = stageFilter === s ? null : s; view = "apps"; render(); }}},
     `${s} `, el("span", {class: "num"}, counts[s]));
-  document.getElementById("pipeline").replaceChildren(
+  // The stage row filters applications, so it shows only on that page: next to the "applications" link, its
+  // "applied" read like a second button for the same thing.
+  const pipeline = document.getElementById("pipeline"), strip = document.getElementById("strip");
+  pipeline.hidden = strip.hidden = view !== "apps";
+  pipeline.replaceChildren(el("span", {class: "label"}, "filter by stage"),
     ...open.flatMap((s, i) => i < open.length - 1 ? [button(s), el("span", {"aria-hidden": "true"}, "▸")] : [button(s)]),
     el("span", {style: "margin-left:auto"}), ...closed.map(button));
   document.getElementById("strip").replaceChildren(

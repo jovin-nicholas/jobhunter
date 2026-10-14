@@ -99,6 +99,10 @@ class TestPage(unittest.TestCase):
         self.assertIn('view === "alerts" ? renderAlerts()', self.text)
         self.assertNotIn("state.review", self.text.split("function renderApps()")[1].split("function renderAlerts()")[0])
 
+    def test_the_stage_row_is_a_labelled_filter_shown_only_on_the_applications_page(self):
+        self.assertIn('pipeline.hidden = strip.hidden = view !== "apps"', self.text)
+        self.assertIn('"filter by stage"', self.text)
+
     def test_bad_matches_and_hidden_alerts_can_be_seen_and_restored(self):
         self.assertIn("state.dismissed", self.text)
         self.assertIn('"restore"', self.text)
