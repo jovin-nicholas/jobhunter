@@ -250,6 +250,12 @@ class TestDismissed(unittest.TestCase):
         self.apps.add_from_job("dice_3", "2026-10-01")
         self.assertEqual(self.apps.dismissed(14), [])
 
+    def test_the_limit_keeps_the_newest_dismissals(self):
+        with self.store.connect() as conn:
+            for i, at in enumerate(("2026-10-01T09:00:00+00:00", "2026-10-03T09:00:00+00:00", "2026-10-02T09:00:00+00:00")):
+                conn.execute("INSERT INTO review_hidden (job_id, hidden_at) VALUES (?, ?)", (f"dice_{i}", at))
+        self.assertEqual([r["job_id"] for r in self.apps.dismissed(14, limit=2)], ["dice_1", "dice_2"])
+
     def test_old_alerts_are_left_out(self):
         self.apps.hide_from_review("dice_0")
         later = datetime.now(timezone.utc) + timedelta(days=15)

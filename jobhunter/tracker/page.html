@@ -315,6 +315,9 @@ function renderApps() {
   if (!allApps().length && !query) parts.push(el("p", {class: "empty"}, "No applications yet. Mark the alerts you applied to "
                                                  + "with “applied” on the alerts page, or add one with the Add box above."));
   if (query && !visible.length) parts.push(el("p", {class: "empty"}, `No matches for “${query}”.`));
+  else if (stageFilter && !visible.length && allApps().length) parts.push(el("p", {class: "empty"},
+    showClosed || !state.closed_stages.includes(stageFilter) ? `No applications in ${stageFilter}.`
+                                                              : `No applications in ${stageFilter}. Closed ones are hidden: show them below.`));
   return parts;
 }
 function dismissedRow(r) {
@@ -468,7 +471,7 @@ async function review(jobId, action) {
 // Back to the alerts to review: a hidden alert is unhidden, a bad match made here loses its label.
 async function restore(r) {
   try {
-    await api("POST", "/api/review/undo", r.kind === "hidden" ? {job_id: r.job_id} : {message_id: r.message_id});
+    await api("POST", "/api/review/undo", r.kind === "hidden" ? {job_id: r.job_id} : {message_id: r.message_id, job_id: r.job_id});
     await refresh(); toast("Restored to the alerts to review");
   } catch (e) { toast(`Not restored: ${e.message}`); }
 }

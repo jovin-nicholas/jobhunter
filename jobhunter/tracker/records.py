@@ -319,7 +319,7 @@ class Applications:
                  "alerted_at": at, **fit_fields(score, label, model, scales)}
                 for i, t, c, u, b, label, score, at, model in rows]
 
-    def dismissed(self, days: int, now: datetime | None = None) -> list[dict]:
+    def dismissed(self, days: int, now: datetime | None = None, limit: int = 500) -> list[dict]:
         """Notified jobs from the last `days` taken off the review queue without applying: the latest verdict is bad
         (`kind` "bad", from the tracker or an email) or the job was hidden ("hidden"). Newest dismissal first. A
         tracker label carries its `message_id`, which restoring passes to undo; an email's label carries None."""
@@ -333,7 +333,9 @@ class Applications:
                 "LEFT JOIN review_hidden h ON h.job_id = j.id "
                 "WHERE j.status = 'notified' AND j.run_at >= ? "
                 "AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id) "
-                "AND (f.verdict = 'bad' OR h.job_id IS NOT NULL) LIMIT 500", (cutoff,)).fetchall()
+                "AND (f.verdict = 'bad' OR h.job_id IS NOT NULL) "
+                "ORDER BY MAX(COALESCE(CASE WHEN f.verdict = 'bad' THEN f.received_at END, ''), "
+                "COALESCE(h.hidden_at, '')) DESC, j.id DESC LIMIT ?", (cutoff, limit)).fetchall()
         scales = load_scales(self.store.path.parent)
         out = []
         for i, t, c, u, b, label, score, alerted, model, verdict, received, message_id, hidden_at in rows:

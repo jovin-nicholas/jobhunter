@@ -105,6 +105,12 @@ class TestPage(unittest.TestCase):
         self.assertIn('stageFilter = stageFilter === s && view === "apps" ? null : s; view = "apps"', self.text)
         self.assertIn('id="brand"', self.text)                               # the brand shows all applications
 
+    def test_a_stage_with_no_applications_says_so(self):
+        self.assertIn("No applications in ${stageFilter}", self.text)
+
+    def test_restore_also_unhides_a_bad_match(self):
+        self.assertIn("{message_id: r.message_id, job_id: r.job_id}", self.text)
+
     def test_bad_matches_and_hidden_are_a_tab_at_the_top_of_the_alerts_page(self):
         self.assertIn('id: "alerts-tabs"', self.text.split("function renderAlerts()")[1].split("\nfunction ")[0])
         self.assertIn('alertsTab === "dismissed"', self.text)

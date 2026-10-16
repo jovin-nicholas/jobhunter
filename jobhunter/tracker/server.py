@@ -259,6 +259,8 @@ class _Handler(BaseHTTPRequestHandler):
         apps.delete_verdict(str(message_id))
         if app_id is not None:
             apps.delete_application(app_id)
+        if body.get("job_id"):
+            apps.unhide(str(body["job_id"]))   # restoring a bad match that was also hidden brings it all the way back
 
 
 def serve(apps: Applications, settings: TrackerSettings, *, port: int, http: Any, open_browser: bool,

@@ -133,6 +133,14 @@ class TestApi(ServerTestCase):
         state = json.loads(self.call("GET", "/api/state")[2])
         self.assertEqual((state["dismissed"], [r["job_id"] for r in state["review"]]), ([], ["dice_1"]))
 
+    def test_restoring_an_alert_both_hidden_and_marked_bad_brings_it_back(self):
+        self.call("POST", "/api/review", {"job_id": "dice_1", "action": "hide"})
+        self.call("POST", "/api/review", {"job_id": "dice_1", "action": "bad"})
+        [row] = json.loads(self.call("GET", "/api/state")[2])["dismissed"]
+        self.assertEqual(self.call("POST", "/api/review/undo", {"message_id": row["message_id"], "job_id": "dice_1"})[0], 200)
+        state = json.loads(self.call("GET", "/api/state")[2])
+        self.assertEqual((state["dismissed"], [r["job_id"] for r in state["review"]]), ([], ["dice_1"]))
+
     def test_a_date_out_of_range_is_a_400(self):
         app_id = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
         for path, body in ((f"/api/applications/{app_id}", {"applied_at": "0002-10-06"}),
