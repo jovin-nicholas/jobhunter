@@ -358,6 +358,22 @@ class TestBoardEmploymentType(unittest.TestCase):
         self.assertTrue(f().check(job(employment_type="Full-time, Contract to Hire")).keep)
         self.assertFalse(f(contract_to_hire="exclude").check(job(employment_type="Full-time, Contract to Hire")).keep)
 
+    def test_other_spellings_of_a_contract_listing_skip(self):
+        for label in ("Contract - W2", "Contract W2", "Contract Corp-To-Corp", "Third Party, Contract-W2"):
+            with self.subTest(label=label):
+                self.assertEqual(f(contract_text=False).check(job(employment_type=label)).reason,
+                                 f"contract: listed as {label}")
+
+    def test_other_spellings_of_contract_to_hire_follow_the_setting(self):
+        for label in ("Contract-to-hire", "Contract To Hire", "contract-to-hire, Third Party"):
+            with self.subTest(label=label):
+                self.assertTrue(f(contract_text=False).check(job(employment_type=label)).keep)
+                self.assertFalse(f(contract_to_hire="exclude", contract_text=False)
+                                 .check(job(employment_type=label)).keep)
+
+    def test_a_word_that_only_starts_with_contract_is_not_a_contract(self):
+        self.assertTrue(f(contract_text=False).check(job(employment_type="Contractual Full-time")).keep)
+
     def test_contract_to_hire_listings_follow_the_contract_to_hire_setting(self):
         self.assertTrue(f().check(job(employment_type="Contract to Hire")).keep)
         result = f(contract_to_hire="exclude").check(job(employment_type="Contract to Hire"))

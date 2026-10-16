@@ -111,10 +111,16 @@ _LISTED_HOURLY_RE = re.compile(rf"(?:\$\s*)?{_NUM}(?:\s*-\s*\$?\s*{_NUM})?(?:\s+
 
 
 def _listed_contract(label: str, contract_to_hire: str) -> bool:
-    """Whether a board's employment type ("Contract, Third Party") marks a contract role, also when it lists full-time
-    as well ("Full-time, Contract": mostly staffing posts)."""
-    parts = {part.strip().lower() for part in label.split(",")}
-    return "contract" in parts or ("contract to hire" in parts and contract_to_hire == "exclude")
+    """Whether a board's employment type ("Contract, Third Party", "Contract - W2") marks a contract role, also when it
+    lists full-time as well ("Full-time, Contract": mostly staffing posts). Contract to hire follows its setting."""
+    for part in label.lower().split(","):
+        words = " ".join(part.replace("-", " ").split())      # "Contract-to-hire", "Contract - W2" -> spaced words
+        if words.startswith("contract to hire"):
+            if contract_to_hire == "exclude":
+                return True
+        elif words.split(" ", 1)[0] == "contract":             # "Contract", "Contract W2", "Contract Corp To Corp"
+            return True
+    return False
 
 
 _INTERN_TITLE_TERMS = ("intern", "internship", "co-op", "coop")
