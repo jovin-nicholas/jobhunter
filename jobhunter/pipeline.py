@@ -219,6 +219,17 @@ def take_turns(jobs: list[Job]) -> list[Job]:
     ordered: list[Job] = []
     for turn in range(max((len(q) for q in queues.values()), default=0)):
         ordered.extend(q[turn] for q in queues.values() if turn < len(q))
+    # The first copy of a job judged takes the alert and later ones are duplicates, so the copies of one job keep the
+    # boards' order (a company's own board before an aggregator listed after it): they swap into the slots taken.
+    by_key: dict[tuple[str, str], list[int]] = {}
+    for slot, job in enumerate(ordered):
+        by_key.setdefault(same_job_key(job.title, job.company), []).append(slot)
+    rank = {id(job): i for i, job in enumerate(jobs)}
+    for slots in by_key.values():
+        if len(slots) > 1:
+            copies = sorted((ordered[s] for s in slots), key=lambda j: rank[id(j)])
+            for s, job in zip(slots, copies):
+                ordered[s] = job
     return ordered
 
 

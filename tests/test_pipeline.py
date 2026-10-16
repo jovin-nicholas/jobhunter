@@ -893,10 +893,6 @@ class TestScaledFitInRunLog(unittest.TestCase):
         self.assertTrue(any("(raw " in line for line in logs), logs)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestTakeTurns(unittest.TestCase):
     def job(self, source, n):
         return Job(f"{source}_{n}", f"Engineer {n}", "Acme", "Remote", f"https://example.com/{source}/{n}",
@@ -911,6 +907,20 @@ class TestTakeTurns(unittest.TestCase):
         jobs = [self.job("big", i) for i in range(3)]
         self.assertEqual(take_turns(jobs), jobs)
         self.assertEqual(take_turns([]), [])
+
+
+    def test_a_job_listed_by_two_boards_is_judged_first_from_the_board_listed_first(self):
+        # The first copy judged takes the alert; the others are saved as duplicates. Taking turns must not hand it to
+        # a later board (an aggregator) when an earlier one (a company's own board) lists the same job.
+        def titled(source, n, title):
+            job = self.job(source, n)
+            job.title, job.company = title, "Acme"
+            return job
+        ats = [titled("ats", i, t) for i, t in enumerate(["Data Engineer", "SRE", "Backend Engineer"])]
+        agg = [titled("agg", 0, "Backend Engineer"), titled("agg", 1, "Platform Engineer")]
+        order = [j.id for j in take_turns(ats + agg)]
+        self.assertLess(order.index("ats_2"), order.index("agg_0"))
+        self.assertEqual(sorted(order), sorted(j.id for j in ats + agg))
 
 
 TWO_BOARDS = """
@@ -949,3 +959,7 @@ class TestRunTakesTurns(unittest.TestCase):
         notifier = FakeNotifier()
         run(app, Store(tmp / "data" / "jobs.db"), notifier, log=lambda line: None)
         self.assertEqual([job_id for job_id, _, _ in notifier.sent], ["many_0", "few_0", "many_1", "many_2"])
+
+
+if __name__ == "__main__":
+    unittest.main()
