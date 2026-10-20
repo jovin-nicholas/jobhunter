@@ -131,10 +131,13 @@ class TestPage(unittest.TestCase):
         self.assertIn('["due", "due"], ["last activity", "when"]', self.text)
         row = self.text.split("function appRow(a) {")[1].split("\n}")[0]
         self.assertIn('el("td", {class: "due num"}, a.due ? until(a.due) : "")', row)
-        self.assertIn("whenAt(last)", row)
+        self.assertIn("dayOf(last)", row)
+        # last activity is a date in every row ("Oct 20"), the time only on hover
+        body = self.text.split("function dayOf(iso) {")[1].split("\n}")[0]
+        self.assertIn('{month: "short", day: "numeric"}', body)
+        self.assertNotIn("weekday", body)
+        self.assertNotIn("toLocaleTimeString", body)
         self.assertIn("const last = lastActivityAt(a);", row)
-        # a back-dated event has no time of day, so none is shown for it
-        self.assertIn("never a time", self.text)
         # a screen or interview scheduled ahead is not activity yet
         self.assertIn("a.events.filter(e => e.at <= state.today)", self.text)
         self.assertNotIn("appAge", self.text)

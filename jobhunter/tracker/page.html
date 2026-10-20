@@ -206,21 +206,22 @@ function localDay(iso) {
 function whenFull(iso) { const t = new Date(iso); return isNaN(t) ? "" : t.toLocaleString(); }
 // An application's age: days since its last activity, or, for activity today, the time it was entered.
 // When an application last changed, for the "last activity" column: the latest event dated today or earlier (a call
-// scheduled ahead is not activity yet). Its entry time is shown only when it was entered on that same day; a
-// back-dated event has a date and no time, so it shows the day only.
+// scheduled ahead is not activity yet). Its entry time comes along when it was entered on that same day, for the
+// tooltip; a back-dated event has a date only.
 function lastActivityAt(a) {
   const events = a.events.filter(e => e.at <= state.today).sort((x, y) => (x.at + (x.created_at || "")).localeCompare(y.at + (y.created_at || "")));
   const e = events[events.length - 1];
   if (!e) return a.created_at || "";
   return e.created_at && localDay(e.created_at) === e.at ? e.created_at : e.at;
 }
-// when() for a timestamp; a bare date ("2026-10-17") gives the weekday within the week, else the date, never a time.
-function whenAt(iso) {
-  if (/T/.test(iso)) return when(iso);
-  const t = new Date(iso + "T12:00:00");
-  if (iso === localDay(new Date().toISOString())) return "today";
-  return Date.now() - t < 6 * 86400000 ? t.toLocaleDateString(undefined, {weekday: "short"})
-                                        : t.toLocaleDateString(undefined, {month: "short", day: "numeric"});
+// The "last activity" date in every row ("Oct 20"), with the year when it is not this year: one format for the
+// column. The exact time is in the cell's tooltip; a back-dated event has a date only.
+function dayOf(iso) {
+  const t = /T/.test(iso) ? new Date(iso) : new Date(iso + "T12:00:00");
+  if (isNaN(t)) return "";
+  const opts = {month: "short", day: "numeric"};
+  if (t.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return t.toLocaleDateString(undefined, opts);
 }
 function until(iso) {
   const d = daysBetween(state.today, iso);
@@ -290,7 +291,7 @@ function appRow(a) {
     el("td", {class: "title", title: a.title}, titleCell(a.title, a.url)),
     el("td", {class: "stage"}, a.stage),
     el("td", {class: "due num"}, a.due ? until(a.due) : ""),
-    el("td", {class: "when num", title: /T/.test(last) ? whenFull(last) : fmt(last)}, whenAt(last)),
+    el("td", {class: "when num", title: /T/.test(last) ? whenFull(last) : fmt(last)}, dayOf(last)),
     el("td", {class: "fit num"}, fitCell(a)),
     el("td", {class: "board"}, a.board || ""));
 }
