@@ -96,31 +96,38 @@ def bootstrap(settings_path: str | Path, env: Mapping[str, str] | None = None) -
         scorers.append((s.name, _construct(f"scorers.{s.name}", registry.scorers[s.name], s.options, problems)))
     letter_writer = None
     if settings.cover_letters.enabled:
-        name = settings.cover_letters.writer
-        letter_writer = dict(scorers).get(name)
-        # Letters get their own writer when the scorer has letter defaults (Ollama: thinking on, some temperature)
-        # or cover_letters.options are given; otherwise the scorer itself writes, sharing its keys and rate limits.
-        defaults = getattr(registry.scorers.get(name), "LETTER_DEFAULTS", {})
-        if letter_writer is not None and (defaults or settings.cover_letters.options):
-            scorer = letter_writer
-            scorer_options = next(s.options for s in settings.scorers if s.name == name)
-            defaults = dict(defaults)
-            if "timeout_s" in defaults and "timeout_s" in scorer_options:
-                # Thinking makes letters slower than scoring, so they never get less time than the scorer has.
-                defaults["timeout_s"] = max(defaults["timeout_s"], scorer_options["timeout_s"])
-            letter_writer = _construct("cover_letters.options", registry.scorers[name],
-                                       {**scorer_options, **defaults, **settings.cover_letters.options}, problems)
-            # A cloud writer on the same API keys shares the scorer's key rotation and pacing, so letters and scoring
-            # together stay within the free tier's rate limit.
-            same_keys = getattr(getattr(letter_writer, "options", None), "api_keys_env", None)
-            if same_keys and same_keys == getattr(getattr(scorer, "options", None), "api_keys_env", None):
-                letter_writer.keys, letter_writer.pacer = scorer.keys, scorer.pacer
-        if letter_writer is not None and not callable(getattr(letter_writer, "generate", None)):
-            problems.append(f"cover_letters.writer: {settings.cover_letters.writer} cannot write text "
-                            "(use ollama, gemini, groq, or a scorer plugin with a generate(prompt) method)")
+        letter_writer = build_letter_writer(settings, registry, dict(scorers).get(settings.cover_letters.writer),
+                                            problems)
     if problems:
         raise SettingsError(problems)
     return App(settings, registry, resumes, filters, ScorerChain(scorers, settings.decisions), boards, letter_writer)
+
+
+def build_letter_writer(settings: Any, registry: Any, scorer: Any, problems: list[str]) -> Any:
+    """The cover-letter writer for cover_letters.writer, from that scorer's instance (`scorer`, None when it is not
+    listed under scorers). Used by runs when alert letters are on, and by the tracker's letter button either way."""
+    name = settings.cover_letters.writer
+    letter_writer = scorer
+    # Letters get their own writer when the scorer has letter defaults (Ollama: thinking on, some temperature)
+    # or cover_letters.options are given; otherwise the scorer itself writes, sharing its keys and rate limits.
+    defaults = getattr(registry.scorers.get(name), "LETTER_DEFAULTS", {})
+    if letter_writer is not None and (defaults or settings.cover_letters.options):
+        scorer_options = next(s.options for s in settings.scorers if s.name == name)
+        defaults = dict(defaults)
+        if "timeout_s" in defaults and "timeout_s" in scorer_options:
+            # Thinking makes letters slower than scoring, so they never get less time than the scorer has.
+            defaults["timeout_s"] = max(defaults["timeout_s"], scorer_options["timeout_s"])
+        letter_writer = _construct("cover_letters.options", registry.scorers[name],
+                                   {**scorer_options, **defaults, **settings.cover_letters.options}, problems)
+        # A cloud writer on the same API keys shares the scorer's key rotation and pacing, so letters and scoring
+        # together stay within the free tier's rate limit.
+        same_keys = getattr(getattr(letter_writer, "options", None), "api_keys_env", None)
+        if same_keys and same_keys == getattr(getattr(scorer, "options", None), "api_keys_env", None):
+            letter_writer.keys, letter_writer.pacer = scorer.keys, scorer.pacer
+    if letter_writer is not None and not callable(getattr(letter_writer, "generate", None)):
+        problems.append(f"cover_letters.writer: {settings.cover_letters.writer} cannot write text "
+                        "(use ollama, gemini, groq, or a scorer plugin with a generate(prompt) method)")
+    return letter_writer
 
 
 def _construct(key: str, cls: type, options: dict, problems: list[str]) -> Any:

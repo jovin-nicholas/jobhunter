@@ -142,6 +142,15 @@ class TestPage(unittest.TestCase):
         self.assertIn("a.events.filter(e => e.at <= state.today)", self.text)
         self.assertNotIn("appAge", self.text)
 
+    def test_the_drawer_writes_shows_copies_and_rewrites_a_cover_letter(self):
+        drawer = self.text.split("function renderDrawer() {")[1].split("\nfunction ")[0]
+        self.assertIn("coverLetter(a)", drawer)
+        section = self.text.split("function coverLetter(a) {")[1].split("\nfunction ")[0]
+        for text in ("Write cover letter", "Writing… (about a minute)", "Copy", "Write again", "a.has_description"):
+            self.assertIn(text, section)
+        self.assertIn("/cover-letter`", self.text)
+        self.assertIn('editable(a, "cover_letter"', section)
+
     def test_a_hand_added_application_says_why_it_has_no_fit(self):
         self.assertIn("added by hand: no fit score", self.text)
 

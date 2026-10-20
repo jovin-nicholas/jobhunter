@@ -329,9 +329,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "export-feedback":
             return _export_feedback(store, args.out or settings.data_dir / "feedback_labels.csv", args.since)
         if args.command == "tracker":
+            from jobhunter.tracker.letters import make_letter_writer
             from jobhunter.tracker.server import serve
+            try:
+                write_letter = make_letter_writer(settings_path)
+            except SettingsError as e:
+                write_letter = None
+                print("cover letters are off in the tracker: " + "; ".join(e.problems))
             serve(Applications(store), settings.tracker, port=args.port,
-                  http=Http() if settings.tracker.fetch_titles else None, open_browser=not args.no_open)
+                  http=Http() if settings.tracker.fetch_titles else None, open_browser=not args.no_open,
+                  write_letter=write_letter)
             return 0
         if args.command == "tracker-import":
             return _tracker_import(Applications(store), args.path, args.dry_run)

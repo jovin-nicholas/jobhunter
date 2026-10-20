@@ -81,6 +81,11 @@ kbd { font-size: 11px; color: var(--muted); }
 label.field { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
 label.field input, label.field textarea { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); color: var(--ink); }
 textarea { min-height: 90px; resize: vertical; }
+textarea.letter { min-height: 260px; font-size: 13px; line-height: 1.5; }
+.cl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 0; }
+.cl-row .hint { color: var(--muted); font-size: 12px; }
+.primary[disabled] { opacity: .6; cursor: default; }
+label.field .saved { float: right; color: var(--muted); }
 .timeline { list-style: none; padding: 0; margin: 16px 0 0; border-top: 1px solid var(--rule); }
 .timeline li { padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
 .timeline time { color: var(--muted); margin-right: 10px; }
@@ -417,12 +422,50 @@ function renderDrawer() {
     el("label", {class: "field"}, "Applied on", editable(a, "applied_at", "", "Applied on", "date")),
     el("label", {class: "field"}, "People", editable(a, "people", "", "Jane at Acme, recruiter")),
     el("label", {class: "field"}, "Notes", editable(a, "notes", "", "", "textarea")),
+    coverLetter(a),
     el("ol", {class: "timeline", reversed: true}, [...a.events].reverse().map(e => el("li", {},
       el("time", {datetime: e.at}, fmt(e.at) + (e.created_at && localDay(e.created_at) === e.at
                                                 ? `, ${new Date(e.created_at).toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"})}` : "")),
       e.kind === "stage" ? e.value : e.kind === "follow_up_set" ? `follow up on ${fmt(e.value)}` : "follow-up done"))),
     a.job_id ? el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showDescription(a.id, e.target)}}, "Show job description")) : null,
     el("button", {type: "button", class: "danger", on: {click: e => deleteApplication(a.id, e.currentTarget)}}, "Delete application")));
+}
+// The cover letter: written from the stored job description and the resume by cover_letters.writer, and saved with the
+// application. Writing takes a minute or two, so the button shows it is busy and the rest of the page keeps working.
+const writingLetters = new Set();
+function coverLetter(a) {
+  const label = el("label", {class: "field"}, "Cover letter",
+    a.cover_letter && a.cover_letter_at ? el("span", {class: "saved"}, `saved · ${dayOf(a.cover_letter_at)}`) : null,
+    a.cover_letter ? editable(a, "cover_letter", "letter", "", "textarea") : null);
+  if (writingLetters.has(a.id)) {
+    return [label, el("p", {class: "cl-row"},
+      el("button", {type: "button", class: "primary", disabled: true}, "Writing… (about a minute)"),
+      el("span", {class: "hint"}, "you can keep using the tracker"))];
+  }
+  if (a.cover_letter) {
+    return [label, el("p", {class: "cl-row"},
+      el("button", {type: "button", class: "small", on: {click: () => copyLetter()}}, "Copy"),
+      el("button", {type: "button", class: "small", on: {click: () => writeLetter(a.id)}}, "Write again"))];
+  }
+  const can = a.has_description;
+  return [label, el("p", {class: "cl-row"},
+    el("button", {type: "button", class: "primary", disabled: !can,
+                  title: can ? null : "added by hand: no job description is stored to write from",
+                  on: {click: () => writeLetter(a.id)}}, "Write cover letter"),
+    el("span", {class: "hint"}, can ? "from the job description and your resume"
+                                    : "needs a stored job description; applications from alerts have one"))];
+}
+async function writeLetter(id) {
+  writingLetters.add(id); renderDrawer();
+  try { await api("POST", `/api/applications/${id}/cover-letter`, {}); toast("Cover letter written"); }
+  catch (e) { toast(`No letter: ${e.message}`); }
+  finally { writingLetters.delete(id); await refresh(); }
+}
+async function copyLetter() {
+  const box = document.getElementById("field-cover_letter");
+  if (!box) return;
+  try { await navigator.clipboard.writeText(box.value); toast("Copied"); }
+  catch (e) { box.focus(); box.select(); toast("Selected: press ⌘C to copy"); }
 }
 function editable(a, field, cls, placeholder, kind = "text") {
   const props = {class: cls, id: `field-${field}`, value: a[field] || "", placeholder, "aria-label": placeholder || field,

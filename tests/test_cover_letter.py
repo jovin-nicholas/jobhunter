@@ -43,6 +43,45 @@ cover_letters: {enabled: true, writer: writer}
 """
 
 
+
+class TestTrackerLetterWriter(unittest.TestCase):
+    """The tracker writes letters with the cover_letters writer even while letters in alerts are off."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def test_letters_are_written_while_alert_letters_are_off(self):
+        from jobhunter.tracker.letters import make_letter_writer
+        text = SETTINGS.replace("{WRITER_OPTIONS}", "{}").replace("enabled: true", "enabled: false")
+        path = write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS, "writer.py": WRITER})
+        write = make_letter_writer(path, env={})
+        letter = write({"title": "Backend Engineer", "company": "Acme", "description": "Java services",
+                        "resume_id": "missing.txt"})
+        self.assertEqual(letter, "Dear team, Backend Engineer at Acme")
+
+    def test_ollama_letters_use_the_letter_defaults(self):
+        from jobhunter.tracker.letters import make_letter_writer
+        text = SETTINGS.replace("  - writer: {WRITER_OPTIONS}\n", "  - ollama: {model: gemma4:e4b}\n").replace(
+            "{enabled: true, writer: writer}", "{enabled: false, writer: ollama}")
+        write = make_letter_writer(write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS}),
+                                   env={})
+        self.assertEqual((write.writer.options.model, write.writer.options.think), ("gemma4:e4b", True))
+
+    def test_without_a_cover_letters_section_there_is_no_writer(self):
+        from jobhunter.tracker.letters import make_letter_writer
+        text = SETTINGS.replace("{WRITER_OPTIONS}", "{}").replace("cover_letters: {enabled: true, writer: writer}\n", "")
+        path = write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS, "writer.py": WRITER})
+        self.assertIsNone(make_letter_writer(path, env={}))
+
+    def test_a_writer_that_is_not_a_listed_scorer_is_a_settings_problem(self):
+        from jobhunter.tracker.letters import make_letter_writer
+        text = SETTINGS.replace("{WRITER_OPTIONS}", "{}").replace("{enabled: true, writer: writer}",
+                                                                  "{enabled: false, writer: fixed}")
+        path = write_project(self.tmp, text, plugins={"boards.py": BOARDS, "scorers.py": SCORERS, "writer.py": WRITER})
+        with self.assertRaises(SettingsError) as err:
+            make_letter_writer(path, env={})
+        self.assertIn("cover_letters.writer: 'fixed' is not listed under scorers", "\n".join(err.exception.problems))
+
 class LetterNotifier:
     def __init__(self):
         self.sent = []

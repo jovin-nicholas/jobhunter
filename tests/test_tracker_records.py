@@ -262,6 +262,46 @@ class TestDismissed(unittest.TestCase):
         self.assertEqual(self.apps.dismissed(14, now=later), [])
 
 
+class TestCoverLetters(unittest.TestCase):
+    def setUp(self):
+        self.store = new_store()
+        acme(self.store)
+        self.apps = Applications(self.store, today=lambda: TODAY)
+
+    def test_a_letter_is_saved_with_its_time_and_can_be_edited(self):
+        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
+        self.assertIsNone(self.apps.get(app_id)["cover_letter"])
+        self.apps.set_cover_letter(app_id, "Dear Acme team,\n\nI build Java services.")
+        app = self.apps.get(app_id)
+        self.assertEqual(app["cover_letter"], "Dear Acme team,\n\nI build Java services.")
+        self.assertTrue(app["cover_letter_at"])
+        self.apps.update(app_id, cover_letter="Edited by hand.")
+        self.assertEqual(self.apps.get(app_id)["cover_letter"], "Edited by hand.")
+
+    def test_the_letter_inputs_come_from_the_stored_job(self):
+        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
+        self.assertEqual(self.apps.letter_inputs(app_id), {"title": "Backend Engineer", "company": "Acme",
+                                                            "description": "Java services", "resume_id": "backend.txt"})
+        self.assertTrue(self.apps.get(app_id)["has_description"])
+
+    def test_a_hand_added_application_has_no_description_to_write_from(self):
+        app_id = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
+        self.assertIsNone(self.apps.letter_inputs(app_id))
+        self.assertFalse(self.apps.get(app_id)["has_description"])
+
+    def test_an_existing_database_gains_the_letter_columns(self):
+        path = Path(tempfile.mkdtemp()) / "jobs.db"
+        with closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute("CREATE TABLE applications (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, "
+                         "title TEXT NOT NULL, company TEXT NOT NULL, url TEXT, board TEXT, resume_id TEXT, fit TEXT, "
+                         "fit_score REAL, applied_at TEXT NOT NULL, stage TEXT NOT NULL, stage_at TEXT NOT NULL, "
+                         "follow_up_at TEXT, people TEXT, notes TEXT, created_at TEXT NOT NULL)")
+        apps = Applications(Store(path), today=lambda: TODAY)
+        app_id = apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
+        apps.set_cover_letter(app_id, "Hello")
+        self.assertEqual(apps.get(app_id)["cover_letter"], "Hello")
+
+
 class TestVerdictUndo(unittest.TestCase):
     def test_only_a_tracker_label_can_be_deleted(self):
         store = new_store()

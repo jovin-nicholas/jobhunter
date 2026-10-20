@@ -220,6 +220,10 @@ labels, like the email buttons), `x` hides it. Bad matches and hidden alerts hav
 restored. **numbers** shows reply rates by board, resume and fit, with how many applications each rests on; `v` moves
 between the three pages. An ✅ Applied email becomes a tracked application on the next run.
 
+An application that came from an alert has a **Write cover letter** button in its details: it writes a draft from
+the stored job description and your resume with `cover_letters.writer` (even while `cover_letters.enabled` is off),
+saves it with the application, and offers **Copy** and **Write again**. With a local Ollama model it takes about a minute.
+
 ![The alerts page: recent alerts to mark applied, a bad match, or hide](docs/images/tracker-alerts.png)
 
 The page runs only on this computer (`127.0.0.1`, with a key in its address), works offline and keeps everything in

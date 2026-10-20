@@ -24,8 +24,10 @@ _TABLES = (
     "CREATE TABLE IF NOT EXISTS review_hidden (job_id TEXT PRIMARY KEY, hidden_at TEXT NOT NULL)",
 )
 _COLUMNS = ("id", "job_id", "title", "company", "url", "board", "resume_id", "fit", "fit_score", "applied_at", "stage",
-            "stage_at", "follow_up_at", "people", "notes", "created_at")
-_EDITABLE = ("title", "company", "url", "applied_at", "people", "notes")
+            "stage_at", "follow_up_at", "people", "notes", "created_at", "cover_letter", "cover_letter_at")
+_EDITABLE = ("title", "company", "url", "applied_at", "people", "notes", "cover_letter")
+# Columns added after the first release, added to an existing table when missing.
+_ADDED_COLUMNS = (("cover_letter", "TEXT"), ("cover_letter_at", "TEXT"))
 _WEB = re.compile(r"^https?://", re.I)
 EARLIEST = date(2000, 1, 1)
 
@@ -126,6 +128,10 @@ class Applications:
         with store.connect() as conn:
             for sql in _TABLES:
                 conn.execute(sql)
+            have = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
+            for column, sql_type in _ADDED_COLUMNS:
+                if column not in have:
+                    conn.execute(f"ALTER TABLE applications ADD COLUMN {column} {sql_type}")
 
     def add(self, *, title: str, company: str, applied_at: str, url: str = "", job_id: str | None = None,
             board: str = "", resume_id: str = "", fit: str = "", fit_score: float | None = None,
@@ -227,14 +233,15 @@ class Applications:
             job_ids = {a["job_id"] for a in apps if a["job_id"]}
             jobs: dict[str, tuple] = {}
             if job_ids:
-                jobs = {jid: (model, label) for jid, model, label in conn.execute(
-                    f"SELECT id, source_model, score_label FROM jobs WHERE id IN ({','.join('?' * len(job_ids))})",
-                    tuple(job_ids))}
+                jobs = {jid: (model, label, described) for jid, model, label, described in conn.execute(
+                    f"SELECT id, source_model, score_label, LENGTH(TRIM(COALESCE(jd_text, ''))) > 0 FROM jobs "
+                    f"WHERE id IN ({','.join('?' * len(job_ids))})", tuple(job_ids))}
         scales = load_scales(self.store.path.parent)
         for a in apps:
             a["events"] = events[a["id"]]
+            a["has_description"] = bool(jobs.get(a["job_id"], (None, None, False))[2])
             if a["fit_score"] is not None and a["job_id"] in jobs:
-                model, label = jobs[a["job_id"]]
+                model, label, _ = jobs[a["job_id"]]
                 a.update(fit_fields(a["fit_score"], label, model, scales))   # rows saved with a scorer's own label
             else:                                                           # show the same way, now scaled
                 a["fit_raw"], a["fit_scaled"] = fit_text(a["fit_score"]), None
@@ -293,6 +300,25 @@ class Applications:
             return conn.execute("SELECT 1 FROM applications WHERE lower(company) = ? AND lower(title) = ? AND "
                                 "applied_at = ? LIMIT 1",
                                 (company.strip().lower(), title.strip().lower(), applied_at)).fetchone() is not None
+
+    def set_cover_letter(self, app_id: int, text: str) -> str:
+        """Saves a written letter with the time it was written; returns that time."""
+        at = now_iso()
+        with self.store.connect() as conn:
+            if conn.execute("UPDATE applications SET cover_letter = ?, cover_letter_at = ? WHERE id = ?",
+                            (text, at, app_id)).rowcount == 0:
+                raise KeyError(app_id)
+        return at
+
+    def letter_inputs(self, app_id: int) -> dict | None:
+        """What a cover letter is written from: the stored job's title, company and description, and the resume it was
+        scored against; None when the application has no stored job description (added by hand)."""
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT j.title, j.company, j.jd_text, a.resume_id FROM applications a "
+                               "JOIN jobs j ON j.id = a.job_id WHERE a.id = ?", (app_id,)).fetchone()
+        if not row or not (row[2] or "").strip():
+            return None
+        return {"title": row[0] or "", "company": row[1] or "", "description": row[2], "resume_id": row[3] or ""}
 
     def description(self, app_id: int) -> str:
         """The stored job description, for preparing an interview after the posting is taken down."""

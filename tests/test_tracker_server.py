@@ -18,6 +18,7 @@ from jobhunter.tracker.server import TrackerServer, csv_cell, parse_quick_add
 class ServerTestCase(unittest.TestCase):
     settings = TrackerSettings()
     http = None
+    write_letter = None
 
     def setUp(self):
         self.store = Store(Path(tempfile.mkdtemp()) / "jobs.db")
@@ -25,7 +26,7 @@ class ServerTestCase(unittest.TestCase):
                             description="Java services", source="dice"), "notified")
         self.apps = Applications(self.store, today=lambda: date(2026, 10, 6))
         self.server = TrackerServer(self.apps, self.settings, port=0, http=self.http, today=lambda: date(2026, 10, 6),
-                                    token="secret-token")
+                                    token="secret-token", write_letter=self.write_letter)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
@@ -77,6 +78,48 @@ class TestSecurity(ServerTestCase):
         self.assertEqual(self.call("POST", "/api/applications?t=secret-token",
                                    {"text": "Globex — Platform Engineer"}, token=None)[0], 403)
         self.assertEqual(self.apps.all(), [])
+
+
+class TestCoverLetterApi(ServerTestCase):
+    asked = []
+
+    @staticmethod
+    def write_letter(inputs):
+        TestCoverLetterApi.asked.append(inputs)
+        if inputs["company"] == "Broken":
+            raise RuntimeError("Ollama is not running")
+        return f"Dear {inputs['company']} team, about {inputs['title']}."
+
+    def test_a_letter_is_written_from_the_stored_job_and_saved(self):
+        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
+        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["text"], "Dear Acme team, about Backend Engineer.")
+        self.assertEqual(self.apps.get(app_id)["cover_letter"], "Dear Acme team, about Backend Engineer.")
+        self.assertEqual(self.asked[-1]["description"], "Java services")
+
+    def test_an_application_without_a_stored_description_is_refused(self):
+        app_id = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
+        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+        self.assertEqual(status, 400)
+        self.assertIn("no job description", json.loads(body)["error"])
+
+    def test_a_writer_failure_is_reported_and_nothing_is_saved(self):
+        self.store.save(Job("dice_2", "SWE", "Broken", "Remote", "https://jobs.example.com/b/2",
+                            description="Go services", source="dice"), "notified")
+        app_id = self.apps.add_from_job("dice_2", "2026-10-01")
+        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+        self.assertEqual(status, 502)
+        self.assertIn("Ollama is not running", json.loads(body)["error"])
+        self.assertIsNone(self.apps.get(app_id)["cover_letter"])
+
+
+class TestCoverLetterWithoutAWriter(ServerTestCase):
+    def test_the_page_is_told_how_to_set_one_up(self):
+        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
+        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+        self.assertEqual(status, 400)
+        self.assertIn("cover_letters.writer", json.loads(body)["error"])
 
 
 class TestApi(ServerTestCase):
