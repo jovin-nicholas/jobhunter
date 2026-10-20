@@ -121,6 +121,11 @@ class TestPage(unittest.TestCase):
         self.assertIn('"restore"', self.text)
         self.assertIn('"/api/review/undo"', self.text.split("async function restore(")[1].split("\n}")[0])
 
+    def test_the_age_column_fits_times_and_lateness(self):
+        # "28d late" and "5:00 PM" were cut off in a 70px column.
+        width = int(re.search(r"\.age \{ width: (\d+)px", self.text).group(1))
+        self.assertGreaterEqual(width, 96)
+
     def test_times_are_shown_instead_of_today(self):
         self.assertNotIn('"today" : `${days}d`', self.text)
         self.assertIn("function when(iso)", self.text)
