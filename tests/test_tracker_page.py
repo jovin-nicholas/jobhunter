@@ -126,6 +126,22 @@ class TestPage(unittest.TestCase):
         width = int(re.search(r"\.age \{ width: (\d+)px", self.text).group(1))
         self.assertGreaterEqual(width, 96)
 
+    def test_due_and_last_activity_are_separate_columns(self):
+        # One "age" column mixed due dates ("in 2d", "5d late"), days quiet ("3d") and clock times ("5:00 PM").
+        self.assertIn('["due", "due"], ["last activity", "when"]', self.text)
+        row = self.text.split("function appRow(a) {")[1].split("\n}")[0]
+        self.assertIn('el("td", {class: "due num"}, a.due ? until(a.due) : "")', row)
+        self.assertIn("whenAt(last)", row)
+        self.assertIn("const last = lastActivityAt(a);", row)
+        # a back-dated event has no time of day, so none is shown for it
+        self.assertIn("never a time", self.text)
+        # a screen or interview scheduled ahead is not activity yet
+        self.assertIn("a.events.filter(e => e.at <= state.today)", self.text)
+        self.assertNotIn("appAge", self.text)
+
+    def test_a_hand_added_application_says_why_it_has_no_fit(self):
+        self.assertIn("added by hand: no fit score", self.text)
+
     def test_times_are_shown_instead_of_today(self):
         self.assertNotIn('"today" : `${days}d`', self.text)
         self.assertIn("function when(iso)", self.text)

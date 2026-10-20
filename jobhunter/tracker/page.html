@@ -53,7 +53,7 @@ tr.row:hover td { background: var(--raised); }
 tr.row.focus td { background: var(--accent-soft); }
 tr.closed td { color: var(--muted); }
 .dot { width: 110px; } .company { width: 22%; } .stage { width: 90px; } .age { width: 96px; text-align: right; }
-.fit { width: 70px; } .when { width: 120px; text-align: right; } .kind { width: 90px; color: var(--muted); } .board { width: 110px; color: var(--muted); } .acts { width: 230px; }
+.fit { width: 70px; } .when { width: 120px; text-align: right; } .due { width: 90px; text-align: right; } .kind { width: 90px; color: var(--muted); } .board { width: 110px; color: var(--muted); } .acts { width: 230px; }
 .acts-row { display: flex; gap: 8px; justify-content: flex-end; }
 a.title-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
 a.title-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
@@ -205,11 +205,22 @@ function localDay(iso) {
 }
 function whenFull(iso) { const t = new Date(iso); return isNaN(t) ? "" : t.toLocaleString(); }
 // An application's age: days since its last activity, or, for activity today, the time it was entered.
-function appAge(a) {
-  if (a.age_days > 0) return `${a.age_days}d`;
-  const today = a.events.filter(e => e.at === state.today && e.created_at).map(e => e.created_at).sort();
-  const at = today.length ? today[today.length - 1] : a.created_at;
-  return at && new Date(at).toDateString() === new Date().toDateString() ? when(at) : "today";
+// When an application last changed, for the "last activity" column: the latest event dated today or earlier (a call
+// scheduled ahead is not activity yet). Its entry time is shown only when it was entered on that same day; a
+// back-dated event has a date and no time, so it shows the day only.
+function lastActivityAt(a) {
+  const events = a.events.filter(e => e.at <= state.today).sort((x, y) => (x.at + (x.created_at || "")).localeCompare(y.at + (y.created_at || "")));
+  const e = events[events.length - 1];
+  if (!e) return a.created_at || "";
+  return e.created_at && localDay(e.created_at) === e.at ? e.created_at : e.at;
+}
+// when() for a timestamp; a bare date ("2026-10-17") gives the weekday within the week, else the date, never a time.
+function whenAt(iso) {
+  if (/T/.test(iso)) return when(iso);
+  const t = new Date(iso + "T12:00:00");
+  if (iso === localDay(new Date().toISOString())) return "today";
+  return Date.now() - t < 6 * 86400000 ? t.toLocaleDateString(undefined, {weekday: "short"})
+                                        : t.toLocaleDateString(undefined, {month: "short", day: "numeric"});
 }
 function until(iso) {
   const d = daysBetween(state.today, iso);
@@ -259,7 +270,8 @@ function header(...cols) { return el("thead", {}, el("tr", {}, cols.map(([label,
 // No fit: the job was judged by a decision-only checkpoint (alert, save or skip), or never scored.
 // A scaled fit shows raw in a tooltip, so the 0-10 calibration never hides where the score actually came from.
 function fitCell(row) {
-  if (!row.fit) return el("span", {title: "no fit score (decided without one, or not scored)"}, "—");
+  if (!row.fit) return el("span", {title: "id" in row && !row.job_id ? "added by hand: no fit score"
+                                                    : "no fit score (decided without one, or not scored)"}, "—");
   return row.fit_raw && row.fit_raw !== row.fit ? el("span", {title: "raw " + row.fit_raw}, row.fit) : row.fit;
 }
 function titleCell(title, url) {
@@ -269,7 +281,7 @@ function titleCell(title, url) {
                   title: "Open the posting", on: {click: e => e.stopPropagation()}}, title || "—");
 }
 function appRow(a) {
-  const due = a.due ? until(a.due) : appAge(a);
+  const last = lastActivityAt(a);
   return el("tr", {class: `row${state.closed_stages.includes(a.stage) ? " closed" : ""}`, "data-key": `app:${a.id}`,
                    on: {click: () => { cursor = visible.findIndex(v => v.type === "app" && v.id === a.id); openDrawer(a.id); }}},
     el("td", {class: "dot"}, el("span", {class: a.reason ? "mark on" : "mark", "aria-hidden": "true"}),
@@ -277,7 +289,8 @@ function appRow(a) {
     el("td", {class: "company"}, a.company || "—"),
     el("td", {class: "title", title: a.title}, titleCell(a.title, a.url)),
     el("td", {class: "stage"}, a.stage),
-    el("td", {class: "age num"}, due),
+    el("td", {class: "due num"}, a.due ? until(a.due) : ""),
+    el("td", {class: "when num", title: /T/.test(last) ? whenFull(last) : fmt(last)}, whenAt(last)),
     el("td", {class: "fit num"}, fitCell(a)),
     el("td", {class: "board"}, a.board || ""));
 }
@@ -298,7 +311,7 @@ function group(title, apps, opts = {}) {
   if (opts.collapsed) return [head];
   if (!apps.length) return opts.empty ? [head, el("p", {class: "empty"}, opts.empty)] : [];
   return [head, el("table", {}, header(["", "dot"], ["company", "company"], ["title", "title"], ["stage", "stage"],
-                                       ["age", "age"], ["fit", "fit"], ["board", "board"]),
+                                       ["due", "due"], ["last activity", "when"], ["fit", "fit"], ["board", "board"]),
                    el("tbody", {}, apps.map(appRow)))];
 }
 function renderApps() {
