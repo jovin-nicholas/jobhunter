@@ -263,43 +263,50 @@ class TestDismissed(unittest.TestCase):
 
 
 class TestCoverLetters(unittest.TestCase):
+    """A letter belongs to the job, so the alert and the application made from it share one."""
+
     def setUp(self):
         self.store = new_store()
         acme(self.store)
         self.apps = Applications(self.store, today=lambda: TODAY)
 
-    def test_a_letter_is_saved_with_its_time_and_can_be_edited(self):
-        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
-        self.assertIsNone(self.apps.get(app_id)["cover_letter"])
-        self.apps.set_cover_letter(app_id, "Dear Acme team,\n\nI build Java services.")
-        app = self.apps.get(app_id)
+    def test_a_letter_is_saved_for_a_job_and_shown_on_its_alert_and_application(self):
+        self.assertIsNone(self.apps.cover_letter("dice_1"))
+        at = self.apps.set_cover_letter("dice_1", "Dear Acme team,\n\nI build Java services.")
+        self.assertEqual(self.apps.cover_letter("dice_1"), ("Dear Acme team,\n\nI build Java services.", at))
+        [alert] = self.apps.review_queue(14)
+        self.assertEqual((alert["cover_letter"], alert["cover_letter_at"], alert["has_description"]),
+                         ("Dear Acme team,\n\nI build Java services.", at, True))
+        app = self.apps.get(self.apps.add_from_job("dice_1", "2026-10-01"))
         self.assertEqual(app["cover_letter"], "Dear Acme team,\n\nI build Java services.")
-        self.assertTrue(app["cover_letter_at"])
-        self.apps.update(app_id, cover_letter="Edited by hand.")
-        self.assertEqual(self.apps.get(app_id)["cover_letter"], "Edited by hand.")
+
+    def test_writing_again_or_editing_replaces_it(self):
+        self.apps.set_cover_letter("dice_1", "First")
+        self.apps.set_cover_letter("dice_1", "Edited by hand.")
+        self.assertEqual(self.apps.cover_letter("dice_1")[0], "Edited by hand.")
 
     def test_the_letter_inputs_come_from_the_stored_job(self):
-        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
-        self.assertEqual(self.apps.letter_inputs(app_id), {"title": "Backend Engineer", "company": "Acme",
-                                                            "description": "Java services", "resume_id": "backend.txt"})
-        self.assertTrue(self.apps.get(app_id)["has_description"])
+        self.assertEqual(self.apps.letter_inputs("dice_1"), {"title": "Backend Engineer", "company": "Acme",
+                                                              "description": "Java services", "resume_id": "backend.txt"})
+        self.assertIsNone(self.apps.letter_inputs("dice_missing"))
 
     def test_a_hand_added_application_has_no_description_to_write_from(self):
         app_id = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
-        self.assertIsNone(self.apps.letter_inputs(app_id))
-        self.assertFalse(self.apps.get(app_id)["has_description"])
+        app = self.apps.get(app_id)
+        self.assertEqual((app["has_description"], app["cover_letter"]), (False, None))
 
-    def test_an_existing_database_gains_the_letter_columns(self):
+    def test_letters_saved_on_applications_by_an_earlier_version_move_to_their_job(self):
         path = Path(tempfile.mkdtemp()) / "jobs.db"
+        store = Store(path)
+        acme(store)
+        Applications(store)
         with closing(sqlite3.connect(path)) as conn, conn:
-            conn.execute("CREATE TABLE applications (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, "
-                         "title TEXT NOT NULL, company TEXT NOT NULL, url TEXT, board TEXT, resume_id TEXT, fit TEXT, "
-                         "fit_score REAL, applied_at TEXT NOT NULL, stage TEXT NOT NULL, stage_at TEXT NOT NULL, "
-                         "follow_up_at TEXT, people TEXT, notes TEXT, created_at TEXT NOT NULL)")
-        apps = Applications(Store(path), today=lambda: TODAY)
-        app_id = apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
-        apps.set_cover_letter(app_id, "Hello")
-        self.assertEqual(apps.get(app_id)["cover_letter"], "Hello")
+            conn.execute("ALTER TABLE applications ADD COLUMN cover_letter TEXT")
+            conn.execute("ALTER TABLE applications ADD COLUMN cover_letter_at TEXT")
+            conn.execute("INSERT INTO applications (job_id, title, company, applied_at, stage, stage_at, created_at, "
+                         "cover_letter, cover_letter_at) VALUES ('dice_1', 'Backend Engineer', 'Acme', '2026-10-01', "
+                         "'applied', '2026-10-01', '2026-10-01T09:00:00+00:00', 'Old letter', '2026-10-20T09:00:00+00:00')")
+        self.assertEqual(Applications(store).cover_letter("dice_1"), ("Old letter", "2026-10-20T09:00:00+00:00"))
 
 
 class TestJobDescription(unittest.TestCase):

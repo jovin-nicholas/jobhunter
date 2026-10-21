@@ -31,7 +31,7 @@ CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline
 EXPORT_COLUMNS = ("company", "title", "url", "stage", "applied_at", "stage_at", "follow_up_at", "board", "fit",
                   "fit_scaled", "resume_id", "people", "notes")
 _SPLIT = re.compile(r"\s+[—–-]\s+")          # "Acme — Backend Engineer" (but "Rolls-Royce" stays whole)
-_APP_PATH = re.compile(r"/api/applications/(\d+)(/stage|/follow-up|/description|/delete|/cover-letter)?")
+_APP_PATH = re.compile(r"/api/applications/(\d+)(/stage|/follow-up|/description|/delete)?")
 
 
 @lru_cache(maxsize=1)
@@ -169,8 +169,13 @@ class _Handler(BaseHTTPRequestHandler):
         if method == "POST" and m and m.group(2) is None:
             apps.update(int(m.group(1)), **body)
             return self._json(200, {"ok": True})
-        if method == "POST" and m and m.group(2) == "/cover-letter":
-            return self._cover_letter(int(m.group(1)))
+        if method == "POST" and path == "/api/cover-letter/write":
+            return self._cover_letter(str(body.get("job_id") or ""))
+        if method == "POST" and path == "/api/cover-letter":
+            text = str(body.get("text") or "").strip()
+            if not text:
+                raise ValueError("a cover letter cannot be empty")
+            return self._json(200, {"at": apps.set_cover_letter(str(body.get("job_id") or ""), text)})
         if method == "POST" and m and m.group(2) == "/delete":
             apps.delete(int(m.group(1)))
             return self._json(200, {"ok": True})
@@ -230,25 +235,24 @@ class _Handler(BaseHTTPRequestHandler):
             ids.append(apps.add_event(app_id, "follow_up_done", None, at))
         return ids
 
-    def _cover_letter(self, app_id: int) -> None:
-        """Writes and saves a letter. It takes a minute or two with a local model; the server is threaded, so the page
-        keeps working meanwhile. A writer failure is a 502 with its reason, and nothing is saved."""
+    def _cover_letter(self, job_id: str) -> None:
+        """Writes and saves a job's letter, for its alert or its application. It takes a minute or two with a local
+        model; the server is threaded, so the page keeps working meanwhile. A writer failure is a 502 with its reason,
+        and nothing is saved."""
         apps, write = self.server.apps, self.server.write_letter
-        if apps.get(app_id) is None:
-            raise KeyError(f"no application {app_id}")
         if write is None:
             raise ValueError("cover letters need a writer: set cover_letters.writer to a scorer listed under scorers "
                              "(for example ollama) in jobhunter.yaml, then restart the tracker")
-        inputs = apps.letter_inputs(app_id)
+        inputs = apps.letter_inputs(job_id)
         if inputs is None:
-            raise ValueError("no job description is stored for this application, so there is nothing to write from")
+            raise ValueError("no job description is stored for this job, so there is nothing to write from")
         try:
             text = (write(inputs) or "").strip()
         except Exception as e:
             return self._json(502, {"error": f"could not write the letter ({type(e).__name__}: {e})"})
         if not text:
             return self._json(502, {"error": "the writer returned an empty letter; try again"})
-        return self._json(200, {"text": text, "at": apps.set_cover_letter(app_id, text)})
+        return self._json(200, {"text": text, "at": apps.set_cover_letter(job_id, text)})
 
     def _review(self, body: dict, today: date) -> dict:
         """What undo needs: the label's message_id, and the application with whether this action created it."""

@@ -22,12 +22,12 @@ _TABLES = (
     "application_id INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT, at TEXT NOT NULL, created_at TEXT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS application_events_by_app ON application_events (application_id)",
     "CREATE TABLE IF NOT EXISTS review_hidden (job_id TEXT PRIMARY KEY, hidden_at TEXT NOT NULL)",
+    # A cover letter belongs to the job: written from its alert or its application, shown on both.
+    "CREATE TABLE IF NOT EXISTS cover_letters (job_id TEXT PRIMARY KEY, text TEXT NOT NULL, written_at TEXT NOT NULL)",
 )
 _COLUMNS = ("id", "job_id", "title", "company", "url", "board", "resume_id", "fit", "fit_score", "applied_at", "stage",
-            "stage_at", "follow_up_at", "people", "notes", "created_at", "cover_letter", "cover_letter_at")
-_EDITABLE = ("title", "company", "url", "applied_at", "people", "notes", "cover_letter")
-# Columns added after the first release, added to an existing table when missing.
-_ADDED_COLUMNS = (("cover_letter", "TEXT"), ("cover_letter_at", "TEXT"))
+            "stage_at", "follow_up_at", "people", "notes", "created_at")
+_EDITABLE = ("title", "company", "url", "applied_at", "people", "notes")
 _WEB = re.compile(r"^https?://", re.I)
 EARLIEST = date(2000, 1, 1)
 
@@ -128,10 +128,11 @@ class Applications:
         with store.connect() as conn:
             for sql in _TABLES:
                 conn.execute(sql)
-            have = {row[1] for row in conn.execute("PRAGMA table_info(applications)")}
-            for column, sql_type in _ADDED_COLUMNS:
-                if column not in have:
-                    conn.execute(f"ALTER TABLE applications ADD COLUMN {column} {sql_type}")
+            # An earlier version kept letters on applications; they move to their job, once.
+            if "cover_letter" in {row[1] for row in conn.execute("PRAGMA table_info(applications)")}:
+                conn.execute("INSERT OR IGNORE INTO cover_letters (job_id, text, written_at) SELECT job_id, cover_letter, "
+                             "COALESCE(cover_letter_at, created_at) FROM applications WHERE job_id IS NOT NULL AND "
+                             "COALESCE(cover_letter, '') != ''")
 
     def add(self, *, title: str, company: str, applied_at: str, url: str = "", job_id: str | None = None,
             board: str = "", resume_id: str = "", fit: str = "", fit_score: float | None = None,
@@ -239,7 +240,6 @@ class Applications:
         scales = load_scales(self.store.path.parent)
         for a in apps:
             a["events"] = events[a["id"]]
-            a["has_description"] = bool(jobs.get(a["job_id"], (None, None, False))[2])
             if a["fit_score"] is not None and a["job_id"] in jobs:
                 model, label, _ = jobs[a["job_id"]]
                 a.update(fit_fields(a["fit_score"], label, model, scales))   # rows saved with a scorer's own label
@@ -247,7 +247,7 @@ class Applications:
                 a["fit_raw"], a["fit_scaled"] = fit_text(a["fit_score"]), None
                 if a["fit_score"] is not None:
                     a["fit"] = fit_text(a["fit_score"])
-        return apps
+        return self._with_letters(apps)
 
     def get(self, app_id: int) -> dict | None:
         rows = self._rows("WHERE id = ?", (app_id,))
@@ -301,24 +301,45 @@ class Applications:
                                 "applied_at = ? LIMIT 1",
                                 (company.strip().lower(), title.strip().lower(), applied_at)).fetchone() is not None
 
-    def set_cover_letter(self, app_id: int, text: str) -> str:
-        """Saves a written letter with the time it was written; returns that time."""
+    def set_cover_letter(self, job_id: str, text: str) -> str:
+        """Saves a job's letter (written, rewritten or edited), replacing the one before; returns when."""
         at = now_iso()
         with self.store.connect() as conn:
-            if conn.execute("UPDATE applications SET cover_letter = ?, cover_letter_at = ? WHERE id = ?",
-                            (text, at, app_id)).rowcount == 0:
-                raise KeyError(app_id)
+            conn.execute("INSERT INTO cover_letters (job_id, text, written_at) VALUES (?, ?, ?) ON CONFLICT(job_id) "
+                         "DO UPDATE SET text = excluded.text, written_at = excluded.written_at", (str(job_id), text, at))
         return at
 
-    def letter_inputs(self, app_id: int) -> dict | None:
-        """What a cover letter is written from: the stored job's title, company and description, and the resume it was
-        scored against; None when the application has no stored job description (added by hand)."""
+    def cover_letter(self, job_id: str) -> tuple[str, str] | None:
+        """A job's saved letter and when it was saved, or None."""
         with self.store.connect() as conn:
-            row = conn.execute("SELECT j.title, j.company, j.jd_text, a.resume_id FROM applications a "
-                               "JOIN jobs j ON j.id = a.job_id WHERE a.id = ?", (app_id,)).fetchone()
+            row = conn.execute("SELECT text, written_at FROM cover_letters WHERE job_id = ?", (str(job_id),)).fetchone()
+        return (row[0], row[1]) if row else None
+
+    def letter_inputs(self, job_id: str) -> dict | None:
+        """What a cover letter is written from: the stored job's title, company and description, and the resume it was
+        scored against; None when there is no stored description."""
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT title, company, jd_text, resume_id FROM jobs WHERE id = ?", (str(job_id),)).fetchone()
         if not row or not (row[2] or "").strip():
             return None
         return {"title": row[0] or "", "company": row[1] or "", "description": row[2], "resume_id": row[3] or ""}
+
+    def _letters(self, conn: Any, job_ids: set) -> dict[str, tuple[str, str, bool]]:
+        """For each job id: its letter, when it was saved, and whether it has a stored description."""
+        if not job_ids:
+            return {}
+        marks = ",".join("?" * len(job_ids))
+        return {jid: (text, at, bool(described)) for jid, text, at, described in conn.execute(
+            f"SELECT j.id, c.text, c.written_at, LENGTH(TRIM(COALESCE(j.jd_text, ''))) > 0 FROM jobs j "
+            f"LEFT JOIN cover_letters c ON c.job_id = j.id WHERE j.id IN ({marks})", tuple(job_ids))}
+
+    def _with_letters(self, rows: list[dict]) -> list[dict]:
+        with self.store.connect() as conn:
+            letters = self._letters(conn, {r["job_id"] for r in rows if r.get("job_id")})
+        for r in rows:
+            text, at, described = letters.get(r.get("job_id"), (None, None, False))
+            r.update(cover_letter=text, cover_letter_at=at, has_description=described)
+        return rows
 
     def job_description(self, job_id: str) -> str:
         """A stored job's description by its id, for an alert's panel; "" when there is none."""
@@ -347,9 +368,9 @@ class Applications:
                 "ORDER BY f.received_at DESC, f.id DESC LIMIT 1), '') NOT IN ('bad', 'applied') "
                 "ORDER BY j.run_at DESC, j.id DESC LIMIT 200", (cutoff,)).fetchall()
         scales = load_scales(self.store.path.parent)
-        return [{"job_id": i, "title": t or "", "company": c or "", "url": safe_url(u or ""), "board": b or "",
-                 "alerted_at": at, **fit_fields(score, label, model, scales)}
-                for i, t, c, u, b, label, score, at, model in rows]
+        return self._with_letters([{"job_id": i, "title": t or "", "company": c or "", "url": safe_url(u or ""),
+                                    "board": b or "", "alerted_at": at, **fit_fields(score, label, model, scales)}
+                                   for i, t, c, u, b, label, score, at, model in rows])
 
     def dismissed(self, days: int, now: datetime | None = None, limit: int = 500) -> list[dict]:
         """Notified jobs from the last `days` taken off the review queue without applying: the latest verdict is bad
@@ -377,7 +398,7 @@ class Applications:
                         "at": max(x for x in ((received if bad else None), hidden_at) if x),
                         "message_id": message_id if bad and str(message_id).startswith("tracker:") else None,
                         **fit_fields(score, label, model, scales)})
-        return sorted(out, key=lambda r: (r["at"], r["job_id"]), reverse=True)
+        return self._with_letters(sorted(out, key=lambda r: (r["at"], r["job_id"]), reverse=True))
 
     def hide_from_review(self, job_id: str) -> None:
         with self.store.connect() as conn:

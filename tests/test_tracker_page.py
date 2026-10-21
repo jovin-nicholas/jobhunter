@@ -142,14 +142,19 @@ class TestPage(unittest.TestCase):
         self.assertIn("a.events.filter(e => e.at <= state.today)", self.text)
         self.assertNotIn("appAge", self.text)
 
-    def test_the_drawer_writes_shows_copies_and_rewrites_a_cover_letter(self):
-        drawer = self.text.split("function renderDrawer() {")[1].split("\nfunction ")[0]
-        self.assertIn("coverLetter(a)", drawer)
-        section = self.text.split("function coverLetter(a) {")[1].split("\nfunction ")[0]
-        for text in ("Write cover letter", "Writing… (about a minute)", "Copy", "Write again", "a.has_description"):
+    def test_the_tracker_opens_on_the_alerts_page(self):
+        self.assertIn('let state = null, view = "alerts",', self.text)
+
+    def test_alerts_and_applications_both_have_the_cover_letter_section(self):
+        for panel in ("function renderDrawer() {", "function renderAlertDrawer(r) {"):
+            body = self.text.split(panel)[1].split("\nfunction ")[0]
+            self.assertIn("coverLetter(", body, panel)
+        section = self.text.split("function coverLetter(item) {")[1].split("\nfunction ")[0]
+        for text in ("Write cover letter", "Writing… (about a minute)", "Copy", "Write again", "item.has_description",
+                     "item.job_id"):
             self.assertIn(text, section)
-        self.assertIn("/cover-letter`", self.text)
-        self.assertIn('editable(a, "cover_letter"', section)
+        self.assertIn('"/api/cover-letter/write"', self.text)
+        self.assertIn('"/api/cover-letter", {job_id', self.text)
 
     def test_clicking_an_alert_opens_its_panel(self):
         row = self.text.split("function reviewRow(r) {")[1].split("\n}")[0]

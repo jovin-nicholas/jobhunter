@@ -90,43 +90,43 @@ class TestCoverLetterApi(ServerTestCase):
             raise RuntimeError("Ollama is not running")
         return f"Dear {inputs['company']} team, about {inputs['title']}."
 
-    def test_a_letter_is_written_from_the_stored_job_and_saved(self):
-        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
-        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+    def test_an_alert_gets_a_letter_written_from_its_stored_job(self):
+        status, _, body = self.call("POST", "/api/cover-letter/write", {"job_id": "dice_1"})
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["text"], "Dear Acme team, about Backend Engineer.")
-        self.assertEqual(self.apps.get(app_id)["cover_letter"], "Dear Acme team, about Backend Engineer.")
         self.assertEqual(self.asked[-1]["description"], "Java services")
+        [alert] = json.loads(self.call("GET", "/api/state")[2])["review"]
+        self.assertEqual(alert["cover_letter"], "Dear Acme team, about Backend Engineer.")
 
-    def test_an_application_without_a_stored_description_is_refused(self):
-        app_id = self.apps.add(title="SWE", company="Initech", applied_at="2026-10-01")
-        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+    def test_the_application_made_from_the_alert_shows_the_same_letter(self):
+        self.call("POST", "/api/cover-letter/write", {"job_id": "dice_1"})
+        app_id = json.loads(self.call("POST", "/api/review", {"job_id": "dice_1", "action": "applied"})[2])["id"]
+        self.assertEqual(self.apps.get(app_id)["cover_letter"], "Dear Acme team, about Backend Engineer.")
+
+    def test_an_edit_is_saved(self):
+        self.call("POST", "/api/cover-letter/write", {"job_id": "dice_1"})
+        self.assertEqual(self.call("POST", "/api/cover-letter", {"job_id": "dice_1", "text": "Mine now."})[0], 200)
+        self.assertEqual(self.apps.cover_letter("dice_1")[0], "Mine now.")
+
+    def test_a_job_without_a_stored_description_is_refused(self):
+        status, _, body = self.call("POST", "/api/cover-letter/write", {"job_id": "dice_missing"})
         self.assertEqual(status, 400)
         self.assertIn("no job description", json.loads(body)["error"])
 
     def test_a_writer_failure_is_reported_and_nothing_is_saved(self):
         self.store.save(Job("dice_2", "SWE", "Broken", "Remote", "https://jobs.example.com/b/2",
                             description="Go services", source="dice"), "notified")
-        app_id = self.apps.add_from_job("dice_2", "2026-10-01")
-        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+        status, _, body = self.call("POST", "/api/cover-letter/write", {"job_id": "dice_2"})
         self.assertEqual(status, 502)
         self.assertIn("Ollama is not running", json.loads(body)["error"])
-        self.assertIsNone(self.apps.get(app_id)["cover_letter"])
+        self.assertIsNone(self.apps.cover_letter("dice_2"))
 
 
 class TestCoverLetterWithoutAWriter(ServerTestCase):
     def test_the_page_is_told_how_to_set_one_up(self):
-        app_id = self.apps.add_from_job("dice_1", "2026-10-01")
-        status, _, body = self.call("POST", f"/api/applications/{app_id}/cover-letter", {})
+        status, _, body = self.call("POST", "/api/cover-letter/write", {"job_id": "dice_1"})
         self.assertEqual(status, 400)
         self.assertIn("cover_letters.writer", json.loads(body)["error"])
-
-
-class TestAlertDescription(ServerTestCase):
-    def test_an_alerts_description_is_read_by_its_job_id(self):
-        status, _, body = self.call("POST", "/api/job-description", {"job_id": "dice_1"})
-        self.assertEqual((status, json.loads(body)["text"]), (200, "Java services"))
-        self.assertEqual(self.call("POST", "/api/job-description", {"job_id": "dice_1"}, token=None)[0], 403)
 
 
 class TestApi(ServerTestCase):

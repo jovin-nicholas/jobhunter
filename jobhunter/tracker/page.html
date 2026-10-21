@@ -158,7 +158,7 @@ const STAGE_KEYS = {s: "screen", i: "interview", o: "offer", r: "rejected", w: "
 const KEY_OF = Object.fromEntries(Object.entries(STAGE_KEYS).map(([k, s]) => [s, k]));
 const VIEWS = ["apps", "alerts", "numbers"];      // "apps" has no header link: the brand and the stage row open it
 let openAlertId = null;        // the alert (job id) whose panel is open, when no application's is
-let state = null, view = "apps", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
+let state = null, view = "alerts", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
 let alertsTab = "review";      // alerts page: "review" or "dismissed"
 let visible = [];          // rows j/k move through: {type: "app", id} or {type: "review", job_id}
 let toastTimer = null;
@@ -418,6 +418,7 @@ function renderAlertDrawer(r) {
     el("p", {class: "edit big"}, r.company || "—"), el("p", {class: "edit"}, r.title || "—"),
     safeHref(r.url) ? el("p", {}, el("a", {href: safeHref(r.url), target: "_blank", rel: "noopener noreferrer"}, "Open the posting ↗")) : null,
     el("div", {class: "stages"}, actions),
+    coverLetter(r),
     el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showJobDescription(r.job_id, e.target)}},
                    "Show job description"))));
 }
@@ -466,36 +467,45 @@ function renderDrawer() {
     a.job_id ? el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showDescription(a.id, e.target)}}, "Show job description")) : null,
     el("button", {type: "button", class: "danger", on: {click: e => deleteApplication(a.id, e.currentTarget)}}, "Delete application")));
 }
-// The cover letter: written from the stored job description and the resume by cover_letters.writer, and saved with the
-// application. Writing takes a minute or two, so the button shows it is busy and the rest of the page keeps working.
-const writingLetters = new Set();
-function coverLetter(a) {
+// The cover letter belongs to the job: the same one shows on its alert and on the application made from it. It is
+// written from the stored job description and the resume by cover_letters.writer, which takes a minute or two, so the
+// button shows it is busy and the rest of the page keeps working. Edits save when the box loses focus.
+const writingLetters = new Set();          // job ids being written
+function coverLetter(item) {
+  const jobId = item.job_id;
+  const box = item.cover_letter ? el("textarea", {class: "letter", id: "field-cover_letter", value: item.cover_letter,
+    "aria-label": "Cover letter", on: {change: e => saveLetter(jobId, e.target.value)}}) : null;
   const label = el("label", {class: "field"}, "Cover letter",
-    a.cover_letter && a.cover_letter_at ? el("span", {class: "saved"}, `saved · ${dayOf(a.cover_letter_at)}`) : null,
-    a.cover_letter ? editable(a, "cover_letter", "letter", "", "textarea") : null);
-  if (writingLetters.has(a.id)) {
+    item.cover_letter && item.cover_letter_at ? el("span", {class: "saved"}, `saved · ${dayOf(item.cover_letter_at)}`) : null,
+    box);
+  if (jobId && writingLetters.has(jobId)) {
     return [label, el("p", {class: "cl-row"},
       el("button", {type: "button", class: "primary", disabled: true}, "Writing… (about a minute)"),
       el("span", {class: "hint"}, "you can keep using the tracker"))];
   }
-  if (a.cover_letter) {
+  if (item.cover_letter) {
     return [label, el("p", {class: "cl-row"},
       el("button", {type: "button", class: "small", on: {click: () => copyLetter()}}, "Copy"),
-      el("button", {type: "button", class: "small", on: {click: () => writeLetter(a.id)}}, "Write again"))];
+      el("button", {type: "button", class: "small", on: {click: () => writeLetter(jobId)}}, "Write again"))];
   }
-  const can = a.has_description;
+  const can = !!(jobId && item.has_description);
   return [label, el("p", {class: "cl-row"},
     el("button", {type: "button", class: "primary", disabled: !can,
                   title: can ? null : "added by hand: no job description is stored to write from",
-                  on: {click: () => writeLetter(a.id)}}, "Write cover letter"),
+                  on: {click: () => writeLetter(jobId)}}, "Write cover letter"),
     el("span", {class: "hint"}, can ? "from the job description and your resume"
-                                    : "needs a stored job description; applications from alerts have one"))];
+                                    : "needs a stored job description; jobs from alerts have one"))];
 }
-async function writeLetter(id) {
-  writingLetters.add(id); renderDrawer();
-  try { await api("POST", `/api/applications/${id}/cover-letter`, {}); toast("Cover letter written"); }
+async function writeLetter(jobId) {
+  writingLetters.add(jobId); renderDrawer();
+  try { await api("POST", "/api/cover-letter/write", {job_id: jobId}); toast("Cover letter written"); }
   catch (e) { toast(`No letter: ${e.message}`); }
-  finally { writingLetters.delete(id); await refresh(); }
+  finally { writingLetters.delete(jobId); await refresh(); }
+}
+async function saveLetter(jobId, text) {
+  if (!text.trim()) { toast("A cover letter cannot be empty"); return; }
+  try { await api("POST", "/api/cover-letter", {job_id: jobId, text}); await refresh(); }
+  catch (e) { toast(`Not saved: ${e.message}`); }
 }
 async function copyLetter() {
   const box = document.getElementById("field-cover_letter");

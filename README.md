@@ -207,24 +207,25 @@ To try it: `send-test-alert`, tap a button on your phone and send, `run --only <
 
 ## Tracker
 
-`python -m jobhunter tracker` opens a page in your browser for the jobs you applied to: what needs you first
-(interviews coming up, due follow-ups, applications gone quiet), then what is waiting, longest quiet first. Paste a job
-link or type `Company — Title` to add one found elsewhere. Moving an application to a stage (`s` screen,
+`python -m jobhunter tracker` opens a page in your browser on the **alerts** of the last 14 days, waiting for review:
+`a` marks one applied, `b` a bad match (both are training labels, like the email buttons), `x` hides it. Click an
+alert for its details: the posting link, its stored description and a **Write cover letter** button, which writes a
+draft from the description and your resume with `cover_letters.writer` (even while `cover_letters.enabled` is off) and
+offers **Copy** and **Write again**; with a local Ollama model it takes about a minute. Bad matches and hidden alerts
+have their own tab, where each can be restored.
+
+![The alerts page: recent alerts to mark applied, a bad match, or hide](docs/images/tracker-alerts.png)
+
+The applications you applied to are a click away on the stage row (or **jobhunter · applications**): what needs you
+first (interviews coming up, due follow-ups, applications gone quiet), then what is waiting, longest quiet first. Paste
+a job link or type `Company — Title` to add one found elsewhere. Moving an application to a stage (`s` screen,
 `i` interview, `o` offer, `r` rejected, `w` withdrawn, `g` ghosted) sets its next follow-up, and every change can be
-undone for a few seconds. The stage row at the top counts applications and filters them by stage.
+undone for a few seconds. An application made from an alert keeps that alert's cover letter.
 
 ![The applications page: what needs you, then what is waiting](docs/images/tracker-applications.png)
 
-**alerts** lists the alerts of the last 14 days for review: `a` marks one applied, `b` a bad match (both are training
-labels, like the email buttons), `x` hides it. Bad matches and hidden alerts have their own tab, where each can be
-restored. **numbers** shows reply rates by board, resume and fit, with how many applications each rests on; `v` moves
-between the three pages. An ✅ Applied email becomes a tracked application on the next run.
-
-An application that came from an alert has a **Write cover letter** button in its details: it writes a draft from
-the stored job description and your resume with `cover_letters.writer` (even while `cover_letters.enabled` is off),
-saves it with the application, and offers **Copy** and **Write again**. With a local Ollama model it takes about a minute.
-
-![The alerts page: recent alerts to mark applied, a bad match, or hide](docs/images/tracker-alerts.png)
+**numbers** shows reply rates by board, resume and fit, with how many applications each rests on; `v` moves between
+the three pages. An ✅ Applied email becomes a tracked application on the next run.
 
 The page runs only on this computer (`127.0.0.1`, with a key in its address), works offline and keeps everything in
 `data/jobs.db`. It is not reachable from a phone; the email buttons are the phone path. Options are under `tracker:`
