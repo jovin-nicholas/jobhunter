@@ -93,10 +93,18 @@ Under `filters:` in `jobhunter.yaml` (every option is in [docs/settings.md](docs
 - **A System One checker** answers what the rules cannot: is this a software engineering role, is it only for current
   students, where is a job whose location names no place, and optionally does it require citizenship or a clearance.
   It needs Ollama 0.35 or later and `ollama pull nimble:9b-q4_K_M` (5.6 GB); only the job is sent, never your resume.
+  After upgrading Ollama, pull the model again: older downloads can stop loading.
 
   ```yaml
   systemone: {model: "nimble:9b-q4_K_M", skip_if: [citizenship, clearance]}   # skip_if is optional
   ```
+
+  It is optional with Laya: Laya's own stack-role and dealbreaker questions cover the software-role check (on a
+  500-posting benchmark, dropping the checker changed no alert) and some citizenship and clearance wording, in about
+  0.9 s a posting against Nimble's 7.5 s. What only the checker covers is students-only roles not titled as
+  internships, a stronger citizenship check, and jobs whose location names no place (without it the rules skip those).
+  Any Ollama model with the decision capability works in its place: `tev1:4b` gave the same software-role answer as
+  Nimble on 184 of 185 postings in about a third of the time (check its licence before relying on it).
 
 - **Contract and hourly jobs** are recognised from the employment type and pay Dice lists ("Contract, Third Party",
   "$45 - $55 hourly", also when it lists full-time as well), then from the title and description:
