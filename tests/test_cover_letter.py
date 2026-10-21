@@ -196,7 +196,7 @@ class TestNotifierLetter(unittest.TestCase):
         with patch("jobhunter.notify.requests.post", return_value=FakeResponse()) as post, \
              patch("jobhunter.notify.smtplib.SMTP", return_value=smtp):
             Notifier(BOTH, env=ENV).send(JOB, RESULT, "backend.txt", cover_letter="Dear team, hello.")
-        self.assertIn("Dear team, hello.", post.call_args.kwargs["json"]["text"])
+        self.assertIn("Dear team, hello.", str(post.call_args.kwargs["json"]["blocks"]))
         raw = smtp.__enter__.return_value.sendmail.call_args.args[2]
         for part in email.message_from_string(raw).walk():                     # plain and HTML parts, base64
             if not part.is_multipart():

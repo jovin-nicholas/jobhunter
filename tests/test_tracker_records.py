@@ -318,6 +318,15 @@ class TestJobDescription(unittest.TestCase):
         self.assertEqual(apps.job_description("dice_missing"), "")
 
 
+class TestDiceLinkCleanup(unittest.TestCase):
+    def test_applications_saved_with_a_dice_tracking_link_get_the_clean_one(self):
+        store = new_store()
+        apps = Applications(store)
+        app_id = apps.add(title="SWE", company="Acme", applied_at="2026-10-01",
+                          url="https://www.dice.com/job-detail/abc?utm_source=jobhunter-0.1 (+self-hosted job search)")
+        self.assertEqual(Applications(store).get(app_id)["url"], "https://www.dice.com/job-detail/abc")
+
+
 class TestVerdictUndo(unittest.TestCase):
     def test_only_a_tracker_label_can_be_deleted(self):
         store = new_store()

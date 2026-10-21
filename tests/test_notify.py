@@ -1,3 +1,4 @@
+import json
 import email
 import unittest
 from unittest.mock import MagicMock, patch
@@ -90,6 +91,40 @@ class TestDelivery(unittest.TestCase):
         self.assertFalse(any("hooks.example" in line or "/abc" in line for line in logs), logs)
         self.assertIn("404", logs[0])
 
+    def payload(self, job=JOB, settings=None, cover_letter=None, result=RESULT):
+        with patch("jobhunter.notify.requests.post", return_value=FakeResponse()) as post, \
+             patch("jobhunter.notify.smtplib.SMTP", return_value=MagicMock()):
+            Notifier(settings or BOTH, env=ENV).send(job, result, "backend.txt", cover_letter=cover_letter)
+        return post.call_args.kwargs["json"]
+
+    def test_slack_alert_links_the_title_and_has_an_open_job_button(self):
+        sent = self.payload()
+        blob = json.dumps(sent["blocks"])
+        self.assertIn("<https://example.com/1|Backend Engineer>", blob)
+        [button] = [e for b in sent["blocks"] if b["type"] == "actions" for e in b["elements"]]
+        self.assertEqual((button["text"]["text"], button["url"]), ("Open job", "https://example.com/1"))
+        self.assertIn("Backend Engineer at Acme", sent["text"])                 # notifications and old clients
+
+    def test_slack_alert_has_the_email_feedback_links_when_email_is_set_up(self):
+        blob = json.dumps(self.payload()["blocks"])
+        for verdict in ("applied", "good", "maybe", "bad"):
+            self.assertIn(f"jh%3A{verdict}%3Adice_1", blob)
+        self.assertIn("mailto:sender%2Bjobhunter-feedback@example.com", blob)
+        self.assertIn("Was it worth it?", blob)
+        slack_only = NotifySettings(slack={"webhook_env": "SLACK_WEBHOOK_URL"})
+        self.assertNotIn("mailto", json.dumps(self.payload(settings=slack_only)))   # no inbox is read then
+
+    def test_a_link_with_spaces_is_encoded_so_it_stays_clickable(self):
+        job = Job("dice_5", "SWE", "Acme", "Remote", "https://jobs.example.com/5?src=a b&x=%41", source="dice")
+        sent = self.payload(job=job)
+        self.assertIn("<https://jobs.example.com/5?src=a%20b&amp;x=%41|SWE>", json.dumps(sent["blocks"]))
+        [button] = [e for b in sent["blocks"] if b["type"] == "actions" for e in b["elements"]]
+        self.assertEqual(button["url"], "https://jobs.example.com/5?src=a%20b&x=%41")
+
+    def test_slack_leaves_out_empty_skills_and_gaps(self):
+        result = ScoreResult(score=8, model="laya:/m", decision="notify", reasoning="Fits.")
+        self.assertNotIn("Gaps", json.dumps(self.payload(result=result)))
+
     def test_slack_text_is_escaped_and_only_web_links_are_linked(self):
         slack_only = NotifySettings(slack={"webhook_env": "SLACK_WEBHOOK_URL"})
         result = ScoreResult(score=8, model="m", decision="notify", reasoning="Fits <@U123> & more",
@@ -98,7 +133,9 @@ class TestDelivery(unittest.TestCase):
         def text(job):
             with patch("jobhunter.notify.requests.post", return_value=FakeResponse()) as post:
                 Notifier(slack_only, env=ENV).send(job, result, "backend.txt", cover_letter="Hi <!here>")
-            return post.call_args.kwargs["json"]["text"]
+            sent = post.call_args.kwargs["json"]
+            # every text Slack renders: the fallback and each block's text, fields and elements
+            return sent["text"] + "\n" + json.dumps(sent.get("blocks", []), ensure_ascii=False)
 
         sent = text(Job("dice_3", "<!channel> Hiring", "A&B <Corp>", "Austin <TX>",
                         "https://example.com/3?a=1&b=2|x>y", source="dice"))
@@ -108,10 +145,10 @@ class TestDelivery(unittest.TestCase):
         for escaped in ("&lt;!channel&gt; Hiring", "A&amp;B &lt;Corp&gt;", "Austin &lt;TX&gt;",
                         "Fits &lt;@U123&gt; &amp; more", "c&lt;b&gt;", "Hi &lt;!here&gt;"):
             self.assertIn(escaped, sent)
-        self.assertIn("<https://example.com/3?a=1&amp;b=2%7Cx%3Ey|Open job>", sent)
+        self.assertIn("<https://example.com/3?a=1&amp;b=2%7Cx%3Ey|&lt;!channel&gt; Hiring>", sent)
         bad = text(Job("dice_4", "Engineer", "Acme", "Austin", "javascript:alert(1)<x|y>", source="dice"))
         self.assertNotIn("<javascript:", bad)
-        self.assertIn("javascript:alert(1)&lt;x|y&gt;", bad)
+        self.assertNotIn("Open job", bad)                                         # no button for a non-web link
 
     def test_a_title_with_a_line_break_still_emails(self):
         smtp = MagicMock()
@@ -151,7 +188,7 @@ class TestFeedbackButtons(unittest.TestCase):
         self.assertNotIn('<a href="x">', html_part)
         self.assertIn("Eng &lt;a href=&quot;x&quot;&gt;", html_part)
         self.assertIn("A&amp;B", html_part)
-        self.assertIn('href="https://e/1?a=1&amp;b=&quot;2&quot;"', html_part)
+        self.assertIn('href="https://e/1?a=1&amp;b=%222%22"', html_part)   # a quote in a link is percent-encoded
 
     def test_without_to_env_alerts_go_to_the_alert_plus_address(self):
         settings = NotifySettings(email={"from_env": "GMAIL_ADDRESS", "password_env": "GMAIL_APP_PASSWORD"})
@@ -180,7 +217,7 @@ class TestEmailLeavesOutInternals(unittest.TestCase):
                 self.assertNotIn("save at", body)
                 self.assertIn("fit 6.4/10", body)
                 self.assertIn("stack role fullstack", body)
-        slack = post.call_args.kwargs["json"]["text"]
+        slack = json.dumps(post.call_args.kwargs["json"])
         self.assertIn("laya_questions_v1", slack)
         self.assertIn("alert at 6.07", slack)
 

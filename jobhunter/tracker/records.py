@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
+from jobhunter.boards.common import without_tracking
 from jobhunter.feedback import VERDICTS
 from jobhunter.fit_scale import FitScale, fit_of, floor2, is_expected_label, load_scales
 from jobhunter.store import Store
@@ -128,6 +129,9 @@ class Applications:
         with store.connect() as conn:
             for sql in _TABLES:
                 conn.execute(sql)
+            # Dice links saved with Dice's tracking had spaces in them, so they were not clickable.
+            for app_id, url in conn.execute("SELECT id, url FROM applications WHERE url LIKE '%dice.com%utm_%'").fetchall():
+                conn.execute("UPDATE applications SET url = ? WHERE id = ?", (without_tracking(url), app_id))
             # An earlier version kept letters on applications; they move to their job, once.
             if "cover_letter" in {row[1] for row in conn.execute("PRAGMA table_info(applications)")}:
                 conn.execute("INSERT OR IGNORE INTO cover_letters (job_id, text, written_at) SELECT job_id, cover_letter, "

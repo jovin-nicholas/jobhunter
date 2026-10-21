@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from jobhunter.boards.common import cutoff, each_listing, is_fresh
+from jobhunter.boards.common import cutoff, each_listing, is_fresh, without_tracking
 from jobhunter.errors import BoardError
 from jobhunter.models import Job, SearchContext
 from jobhunter.registry import board
@@ -64,7 +64,7 @@ def _normalize(raw: dict) -> Job:
         # Fully remote Dice jobs have no jobLocation; Dice lists US jobs, so they are remote within the US.
         location=(raw.get("jobLocation") or {}).get("displayName")
         or ("Remote - US" if raw.get("isRemote") or "Remote" in (raw.get("workplaceTypes") or []) else ""),
-        url=raw.get("detailsPageUrl", ""),
+        url=without_tracking(raw.get("detailsPageUrl", "")),       # Dice puts our User-Agent, spaces and all, in it
         posted_at=raw.get("postedDate", ""),
         description=raw.get("summary", ""),
         source="dice",

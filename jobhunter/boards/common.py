@@ -10,6 +10,17 @@ import requests
 from jobhunter.models import Job, SearchContext
 
 
+def without_tracking(url: str) -> str:
+    """The link without utm_ parameters. Dice copies the client's User-Agent into utm_source, spaces and all, which
+    stops Slack (and some mail apps) from making the link clickable."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    parts = urlsplit(url or "")
+    if "utm_" not in parts.query:
+        return url
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not k.lower().startswith("utm_")]
+    return urlunsplit(parts._replace(query=urlencode(kept)))
+
+
 def cutoff(ctx: SearchContext) -> datetime:
     return datetime.now(timezone.utc) - timedelta(hours=ctx.max_age_hours)
 

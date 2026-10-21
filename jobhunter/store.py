@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jobhunter.feedback import VERDICTS
+from jobhunter.boards.common import without_tracking
 from jobhunter.models import Job, ScoreResult
 
 # Jobs in these statuses are finished and never processed again; anything else is retried on the next run.
@@ -46,6 +47,9 @@ class Store:
             # When a posting first answered empty (mark_empty); kept apart from `jobs` so its retry clock does not
             # touch a job's first_run_at.
             conn.execute("CREATE TABLE IF NOT EXISTS empty_answers (job_id TEXT PRIMARY KEY, first_at TEXT NOT NULL)")
+            # Dice links saved before its tracking was removed had spaces in them, so they were not clickable.
+            for job_id, url in conn.execute("SELECT id, url FROM jobs WHERE source = 'dice' AND url LIKE '%utm_%'").fetchall():
+                conn.execute("UPDATE jobs SET url = ? WHERE id = ?", (without_tracking(url), job_id))
 
     @contextmanager
     def _connect(self):

@@ -6,6 +6,7 @@ import html
 import os
 import re
 import smtplib
+from urllib.parse import quote
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Callable, Mapping
@@ -46,31 +47,35 @@ def slack_escape(text) -> str:
     return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _slack_link(url) -> str:
-    """A web link in Slack's own <url|label> form, with | and > percent-encoded so they cannot end it early; any
-    other URL is shown as escaped text."""
+def web_url(url) -> str:
+    """A web link with spaces and other characters a link cannot hold percent-encoded (an existing %xx is kept), so
+    Slack and mail apps make all of it clickable, not just the part before the first space."""
+    return quote(str(url or "").strip(), safe=":/?#[]@!$&'()*+,;=%~")
+
+
+def _slack_url(url) -> str:
+    """A URL for inside Slack's <url|label>: | and > percent-encoded so they cannot end it early, & escaped."""
+    return slack_escape(web_url(url).replace("|", "%7C").replace(">", "%3E")).replace("&lt;", "%3C")
+
+
+def _slack_link(url, label: str = "Open job") -> str:
+    """A web link in Slack's own <url|label> form; any other URL is shown as escaped text."""
     if not _is_web(url):
         return slack_escape(url)
-    return f"<{slack_escape(str(url).replace('|', '%7C').replace('>', '%3E')).replace('&lt;', '%3C')}|Open job>"
+    return f"<{_slack_url(url)}|{label}>"
 
 
-def _summary(job: Job, result: ScoreResult, resume_id: str, for_email: bool = False,
-             scales: Mapping[str, Any] | None = None) -> str:
-    """The alert text. Slack keeps the model and the cut-offs, with every field escaped for Slack; the email leaves
-    both out."""
-    e = (lambda s: str(s)) if for_email else slack_escape
-    model = "" if for_email else f" ({e(result.model)})"
-    why = _for_reader(result.reasoning) if for_email else e(result.reasoning)
-    link = job.url if for_email else _slack_link(job.url)
-    return (f"{e(job.title)} at {e(job.company)}\n"
-            f"Location: {e(job.location)}\n"
-            f"Link: {link}\n\n"
-            f"Score: {e(score_label(result, scales))}{model}\n"
-            f"Resume: {e(resume_id)}\n"
-            f"Why: {why}\n"
-            f"Matched skills: {e(', '.join(result.matched_skills) or 'none')}\n"
-            f"Gaps: {e(', '.join(result.keyword_gaps) or 'none')}\n"
-            f"Source: {e(job.source)} | Posted: {e(job.posted_at or 'unknown')}")
+def _summary(job: Job, result: ScoreResult, resume_id: str, scales: Mapping[str, Any] | None = None) -> str:
+    """The email's plain-text alert. The model and the cut-offs are left out (Slack keeps them)."""
+    return (f"{job.title} at {job.company}\n"
+            f"Location: {job.location}\n"
+            f"Link: {web_url(job.url) if _is_web(job.url) else job.url}\n\n"
+            f"Score: {score_label(result, scales)}\n"
+            f"Resume: {resume_id}\n"
+            f"Why: {_for_reader(result.reasoning)}\n"
+            f"Matched skills: {', '.join(result.matched_skills) or 'none'}\n"
+            f"Gaps: {', '.join(result.keyword_gaps) or 'none'}\n"
+            f"Source: {job.source} | Posted: {job.posted_at or 'unknown'}")
 
 
 def email_addresses(cfg: dict, env: Mapping[str, str]) -> tuple[str, str, str]:
@@ -94,7 +99,7 @@ def _html(job: Job, result: ScoreResult, resume_id: str, links: list[tuple[str, 
     meta = " · ".join(e(x) for x in (job.company, job.location, job.source,
                                      f"posted {job.posted_at}" if job.posted_at else "") if x)
     # Only a web link gets a button: a scraped javascript: or data: URL would be live in some mail apps.
-    open_job = (f'<p><a href="{e(job.url)}" style="{_BTN};background:#1a73e8;color:#ffffff">Open job ↗</a></p>'
+    open_job = (f'<p><a href="{e(web_url(job.url))}" style="{_BTN};background:#1a73e8;color:#ffffff">Open job ↗</a></p>'
                 if _is_web(job.url) else "")
     buttons = "".join(f'<a href="{e(href)}" style="{_BTN}">{e(label)}</a>' for label, href in links)
     letter = (f'<h3 style="font-size:15px;margin:20px 0 6px">Cover letter draft</h3>'
@@ -147,21 +152,51 @@ class Notifier:
 
     def send(self, job: Job, result: ScoreResult, resume_id: str, cover_letter: str | None = None) -> bool:
         """True when at least one channel delivered the alert, or none is set up."""
-        body = _summary(job, result, resume_id, scales=self.scales)
-        if cover_letter:
-            body += f"\n\nCover letter draft:\n{slack_escape(cover_letter)}"
         delivered = []
         if self.settings.slack:
-            delivered.append(self._slack(job, result, body))
+            delivered.append(self._slack(job, result, resume_id, cover_letter))
         if self.settings.email:
             delivered.append(self._email(job, result, resume_id, cover_letter))
         return not delivered or any(delivered)
 
-    def _slack(self, job: Job, result: ScoreResult, body: str) -> bool:
+    def _slack_payload(self, job: Job, result: ScoreResult, resume_id: str, cover_letter: str | None) -> dict:
+        """Slack blocks: the title linked to the posting, an Open job button, the facts, Laya's reason, the email's
+        feedback links (when email is set up, since verdicts are read from that inbox), then the model and cut-offs.
+        Every job field is escaped, so a posting cannot mention anyone or add links; only web links are linked."""
+        e, score = slack_escape, slack_escape(score_label(result, self.scales))
+        title = _slack_link(job.url, e(job.title)) if _is_web(job.url) else e(job.title)
+        posted = str(job.posted_at or "")
+        posted = posted[:10] if re.match(r"\d{4}-\d{2}-\d{2}", posted) else posted
+        facts = [("Location", job.location), ("Board", " · ".join(x for x in (job.source, posted and f"posted {posted}") if x)),
+                 ("Resume", resume_id)]
+        blocks: list[dict] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": f":dart: *New match · {score}*\n*{title}* at {e(job.company)}"}},
+            {"type": "section", "fields": [{"type": "mrkdwn", "text": f"*{k}*\n{e(v)}"} for k, v in facts if v]},
+        ]
+        if result.reasoning:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": e(result.reasoning)}})
+        if _is_web(job.url):
+            blocks.append({"type": "actions", "elements": [{"type": "button", "style": "primary", "url": web_url(job.url),
+                                                            "text": {"type": "plain_text", "text": "Open job"}}]})
+        if self.settings.email:
+            _, _, feedback_to = email_addresses(self.settings.email, self.env)
+            links = " · ".join(f"<{_slack_url(mailto(feedback_to, verdict, job))}|{label}>" for verdict, label in BUTTONS)
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"Was it worth it? {links}"}]})
+        detail = [f"model {e(result.model)}"]
+        if result.matched_skills:
+            detail.append(f"matched {e(', '.join(result.matched_skills))}")
+        if result.keyword_gaps:
+            detail.append(f"gaps {e(', '.join(result.keyword_gaps))}")
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " · ".join(detail)}]})
+        if cover_letter:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn",
+                                                       "text": f"*Cover letter draft*\n{e(cover_letter)[:2800]}"}})
+        return {"text": f":dart: New match, {score}: {e(job.title)} at {e(job.company)}", "blocks": blocks}
+
+    def _slack(self, job: Job, result: ScoreResult, resume_id: str, cover_letter: str | None) -> bool:
         url = self.env.get(self.settings.slack["webhook_env"], "")
         try:
-            requests.post(url, json={"text": f":dart: *New match, {slack_escape(score_label(result, self.scales))}*"
-                                              f"\n{body}"},
+            requests.post(url, json=self._slack_payload(job, result, resume_id, cover_letter),
                           timeout=10).raise_for_status()
         except Exception as e:
             self.log(f"Slack send failed [{_one_line(job.title)}]: {_failure(e)}")
@@ -172,7 +207,7 @@ class Notifier:
         cfg = self.settings.email
         _, _, feedback_to = email_addresses(cfg, self.env)
         links = [(label, mailto(feedback_to, verdict, job)) for verdict, label in BUTTONS]
-        plain = (_summary(job, result, resume_id, for_email=True, scales=self.scales)
+        plain = (_summary(job, result, resume_id, scales=self.scales)
                  + "\n\nWorth it? Tap one, then send the email it opens:\n"
                  + "\n".join(f"{label}: {href}" for label, href in links))
         if cover_letter:

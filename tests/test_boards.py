@@ -155,6 +155,23 @@ class TestGreenhouse(unittest.TestCase):
 
 
 
+class TestTrackingParameters(unittest.TestCase):
+    def test_utm_parameters_are_removed_and_the_rest_kept(self):
+        from jobhunter.boards.common import without_tracking
+        self.assertEqual(without_tracking("https://www.dice.com/job-detail/" + GUID +
+                                          "?utm_source=jobhunter-0.1 (+self-hosted job search)&utm_medium=mcp"),
+                         "https://www.dice.com/job-detail/" + GUID)
+        self.assertEqual(without_tracking("https://jobs.example.com/1?gh_jid=7&utm_campaign=x#apply"),
+                         "https://jobs.example.com/1?gh_jid=7#apply")
+        self.assertEqual(without_tracking("https://jobs.example.com/1"), "https://jobs.example.com/1")
+
+    def test_dice_links_are_saved_without_dices_tracking(self):
+        raw = dice_job()
+        raw["detailsPageUrl"] = f"https://www.dice.com/job-detail/{GUID}?utm_source=jobhunter-0.1 (+self-hosted job search)&utm_medium=mcp"
+        fake = FakeDice({"search_jobs": lambda a: {"data": [raw]}})
+        self.assertEqual(list(DiceBoard({}).search(ctx(fake)))[0].url, f"https://www.dice.com/job-detail/{GUID}")
+
+
 class TestDiceListingFields(unittest.TestCase):
     def test_employment_type_and_pay_are_kept_for_the_filters(self):
         raw = dice_job()

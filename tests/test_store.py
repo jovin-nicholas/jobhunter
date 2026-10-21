@@ -16,6 +16,21 @@ def job(i, **kw):
                description="Java services", source="dice", ats="dice", **kw)
 
 
+class TestDiceLinkCleanup(unittest.TestCase):
+    def test_saved_dice_links_lose_dices_tracking_when_the_store_opens(self):
+        path = Path(tempfile.mkdtemp()) / "jobs.db"
+        Store(path).save(Job("dice_1", "SWE", "Acme", "Remote",
+                             "https://www.dice.com/job-detail/abc?utm_source=jobhunter-0.1 (+self-hosted job search)"
+                             "&utm_medium=mcp", source="dice"), "notified")
+        Store(path).save(Job("greenhouse_1", "SWE", "Acme", "Remote", "https://boards.example.com/1?utm_source=x",
+                             source="greenhouse"), "notified")
+        Store(path)
+        with closing(sqlite3.connect(path)) as conn:
+            urls = dict(conn.execute("SELECT id, url FROM jobs"))
+        self.assertEqual(urls["dice_1"], "https://www.dice.com/job-detail/abc")
+        self.assertEqual(urls["greenhouse_1"], "https://boards.example.com/1?utm_source=x")    # other boards untouched
+
+
 class TestStore(unittest.TestCase):
     def setUp(self):
         self.path = Path(tempfile.mkdtemp()) / "data" / "jobs.db"
