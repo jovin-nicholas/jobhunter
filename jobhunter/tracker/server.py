@@ -161,6 +161,8 @@ class _Handler(BaseHTTPRequestHandler):
                               {"Content-Disposition": 'attachment; filename="applications.csv"'})
         if method == "GET" and m and m.group(2) == "/description":
             return self._json(200, {"text": apps.description(int(m.group(1)))})
+        if method == "POST" and path == "/api/job-description":
+            return self._json(200, {"text": apps.job_description(str(body.get("job_id") or ""))})
         if method == "POST" and path == "/api/applications":
             app_id, existing = self._quick_add(body, today)
             return self._json(200, {"id": app_id, "existing": existing})

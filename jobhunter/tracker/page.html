@@ -83,7 +83,8 @@ label.field input, label.field textarea { display: block; width: 100%; margin-to
 textarea { min-height: 90px; resize: vertical; }
 textarea.letter { min-height: 260px; font-size: 13px; line-height: 1.5; }
 .cl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 0; }
-.cl-row .hint { color: var(--muted); font-size: 12px; }
+.hint { color: var(--muted); font-size: 12px; }
+.stages .hint { align-self: center; }
 .primary[disabled] { opacity: .6; cursor: default; }
 label.field .saved { float: right; color: var(--muted); }
 .timeline { list-style: none; padding: 0; margin: 16px 0 0; border-top: 1px solid var(--rule); }
@@ -156,6 +157,7 @@ const TOKEN = (() => {
 const STAGE_KEYS = {s: "screen", i: "interview", o: "offer", r: "rejected", w: "withdrawn", g: "ghosted"};
 const KEY_OF = Object.fromEntries(Object.entries(STAGE_KEYS).map(([k, s]) => [s, k]));
 const VIEWS = ["apps", "alerts", "numbers"];      // "apps" has no header link: the brand and the stage row open it
+let openAlertId = null;        // the alert (job id) whose panel is open, when no application's is
 let state = null, view = "apps", cursor = 0, openId = null, stageFilter = null, query = "", showClosed = false;
 let alertsTab = "review";      // alerts page: "review" or "dismissed"
 let visible = [];          // rows j/k move through: {type: "app", id} or {type: "review", job_id}
@@ -304,7 +306,7 @@ function reviewRow(r) {
   const act = (label, key, action) => el("button", {type: "button", title: `${label} (${key})`,
                                                      on: {click: e => { e.stopPropagation(); review(r.job_id, action); }}}, label);
   return el("tr", {class: "row", "data-key": `review:${r.job_id}`,
-                   on: {click: () => { cursor = visible.findIndex(v => v.type === "review" && v.job_id === r.job_id); markCursor(); }}},
+                   on: {click: () => { cursor = visible.findIndex(v => v.type === "review" && v.job_id === r.job_id); openAlert(r.job_id); }}},
     el("td", {class: "company"}, r.company || "—"),
     el("td", {class: "title", title: r.title}, titleCell(r.title, r.url)),
     el("td", {class: "when num", title: whenFull(r.alerted_at)}, when(r.alerted_at)),
@@ -342,7 +344,7 @@ function renderApps() {
 function dismissedRow(r) {
   const restoreButton = el("button", {type: "button", title: "Put it back in the alerts to review",
                                       on: {click: e => { e.stopPropagation(); restore(r); }}}, "restore");
-  return el("tr", {class: "row closed", "data-key": `dismissed:${r.job_id}`},
+  return el("tr", {class: "row closed", "data-key": `dismissed:${r.job_id}`, on: {click: () => openAlert(r.job_id)}},
     el("td", {class: "company"}, r.company || "—"),
     el("td", {class: "title", title: r.title}, titleCell(r.title, r.url)),
     el("td", {class: "when num", title: whenFull(r.alerted_at)}, when(r.alerted_at)),
@@ -394,8 +396,42 @@ function renderNumbers() {
   ];
 }
 
+function findAlert(jobId) {
+  return state.review.find(r => r.job_id === jobId) || state.dismissed.find(r => r.job_id === jobId) || null;
+}
+// An alert's panel: what it is, its link and stored description, and the same actions as its row.
+function renderAlertDrawer(r) {
+  const drawer = document.getElementById("drawer");
+  document.body.classList.add("drawer-open");
+  drawer.hidden = false;
+  const dismissed = state.dismissed.some(d => d.job_id === r.job_id);
+  const act = (label, action) => el("button", {type: "button", on: {click: () => review(r.job_id, action)}}, label);
+  const actions = dismissed
+    ? [el("span", {class: "hint"}, r.kind === "bad" ? "marked a bad match" : "hidden"),
+       r.kind === "hidden" || r.message_id ? el("button", {type: "button", on: {click: () => restore(r)}}, "restore")
+                                           : el("span", {class: "hint"}, "from email")]
+    : [act("applied", "applied"), act("bad match", "bad"), act("hide", "hide")];
+  const eyebrow = [r.board, r.fit && `fit ${r.fit}`, r.alerted_at && `alerted ${whenFull(r.alerted_at)}`].filter(Boolean);
+  drawer.replaceChildren(...kids(
+    el("button", {type: "button", class: "close", "aria-label": "Close", on: {click: closeDrawer}}, "×"),
+    el("p", {class: "eyebrow"}, eyebrow.join(" · ")),
+    el("p", {class: "edit big"}, r.company || "—"), el("p", {class: "edit"}, r.title || "—"),
+    safeHref(r.url) ? el("p", {}, el("a", {href: safeHref(r.url), target: "_blank", rel: "noopener noreferrer"}, "Open the posting ↗")) : null,
+    el("div", {class: "stages"}, actions),
+    el("p", {}, el("button", {type: "button", class: "small", on: {click: e => showJobDescription(r.job_id, e.target)}},
+                   "Show job description"))));
+}
+async function showJobDescription(jobId, button) {
+  const {text} = await api("POST", "/api/job-description", {job_id: jobId});
+  button.replaceWith(el("pre", {class: "jd"}, text || "No description was stored for this job."));
+}
 function renderDrawer() {
   const drawer = document.getElementById("drawer");
+  if (openAlertId !== null && openId === null) {
+    const r = findAlert(openAlertId);
+    if (r) return renderAlertDrawer(r);
+    openAlertId = null;                       // marked applied: it is an application now, not an alert
+  }
   const a = openId === null ? null : findApp(openId);
   document.body.classList.toggle("drawer-open", !!a);
   drawer.hidden = !a;
@@ -494,11 +530,19 @@ async function showDescription(id, button) {
 // Opening from closed adds one history entry, so the browser's back button closes the drawer instead of leaving the
 // tracker; Esc and × go back through that entry rather than adding another.
 function openDrawer(id, draw = true) {
-  if (openId === null) history.pushState({drawer: id}, "");
-  openId = id;
+  if (openId === null && openAlertId === null) history.pushState({drawer: id}, "");
+  openId = id; openAlertId = null;
   if (draw) render();
 }
-function closeDrawer() { if (history.state && history.state.drawer !== undefined) history.back(); else { openId = null; render(); } }
+function openAlert(jobId) {
+  if (openId === null && openAlertId === null) history.pushState({drawer: `alert:${jobId}`}, "");
+  openAlertId = jobId; openId = null;
+  render();
+}
+function closeDrawer() {
+  if (history.state && history.state.drawer !== undefined) history.back();
+  else { openId = null; openAlertId = null; render(); }
+}
 
 async function act(path, body, message) {
   try {
@@ -583,7 +627,7 @@ for (const v of ["alerts", "numbers"]) document.getElementById(`view-${v}`).addE
 document.getElementById("brand").addEventListener("click", () => { view = "apps"; stageFilter = null; render(); });
 document.getElementById("help-open").addEventListener("click", () => { document.getElementById("help").hidden = false; });
 document.getElementById("help").addEventListener("click", () => { document.getElementById("help").hidden = true; });
-window.addEventListener("popstate", () => { if (openId !== null) { openId = null; render(); } });
+window.addEventListener("popstate", () => { if (openId !== null || openAlertId !== null) { openId = null; openAlertId = null; render(); } });
 
 document.addEventListener("keydown", e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
@@ -596,13 +640,14 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     if (typing) e.target.blur();
     document.getElementById("help").hidden = true;
-    if (openId !== null) closeDrawer();
+    if (openId !== null || openAlertId !== null) closeDrawer();
     return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey || !state) return;
   const v = visible[cursor];
   if (e.key === "j" || e.key === "k") { cursor += e.key === "j" ? 1 : -1; markCursor(); return; }
   if (e.key === "Enter" && v && v.type === "app") { openDrawer(v.id); return; }
+  if (e.key === "Enter" && v && v.type === "review") { openAlert(v.job_id); return; }
   if (e.key === "?") { document.getElementById("help").hidden = false; return; }
   if (e.key === "v") { view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]; render(); return; }
   if ("abx".includes(e.key) && v && v.type === "review") { review(v.job_id, {a: "applied", b: "bad", x: "hide"}[e.key]); return; }

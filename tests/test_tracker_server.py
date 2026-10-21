@@ -122,6 +122,13 @@ class TestCoverLetterWithoutAWriter(ServerTestCase):
         self.assertIn("cover_letters.writer", json.loads(body)["error"])
 
 
+class TestAlertDescription(ServerTestCase):
+    def test_an_alerts_description_is_read_by_its_job_id(self):
+        status, _, body = self.call("POST", "/api/job-description", {"job_id": "dice_1"})
+        self.assertEqual((status, json.loads(body)["text"]), (200, "Java services"))
+        self.assertEqual(self.call("POST", "/api/job-description", {"job_id": "dice_1"}, token=None)[0], 403)
+
+
 class TestApi(ServerTestCase):
     def test_quick_add_matches_a_stored_job_with_and_without_its_query(self):
         for url in ("https://jobs.example.com/acme/1?gh_jid=1", "https://jobs.example.com/acme/1/?utm_source=x"):

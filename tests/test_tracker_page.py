@@ -151,6 +151,16 @@ class TestPage(unittest.TestCase):
         self.assertIn("/cover-letter`", self.text)
         self.assertIn('editable(a, "cover_letter"', section)
 
+    def test_clicking_an_alert_opens_its_panel(self):
+        row = self.text.split("function reviewRow(r) {")[1].split("\n}")[0]
+        self.assertIn("openAlert(r.job_id)", row)
+        self.assertIn("function renderAlertDrawer(r)", self.text)
+        panel = self.text.split("function renderAlertDrawer(r) {")[1].split("\nfunction ")[0]
+        for text in ('"applied"', '"bad match"', '"hide"', '"restore"', "Show job description", "Open the posting"):
+            self.assertIn(text, panel)
+        self.assertIn('"/api/job-description"', self.text)
+        self.assertIn('v.type === "review") { openAlert(v.job_id)', self.text)       # Enter opens it too
+
     def test_a_hand_added_application_says_why_it_has_no_fit(self):
         self.assertIn("added by hand: no fit score", self.text)
 

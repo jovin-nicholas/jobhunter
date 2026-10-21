@@ -302,6 +302,15 @@ class TestCoverLetters(unittest.TestCase):
         self.assertEqual(apps.get(app_id)["cover_letter"], "Hello")
 
 
+class TestJobDescription(unittest.TestCase):
+    def test_an_alerts_stored_description_by_job_id(self):
+        store = new_store()
+        acme(store)
+        apps = Applications(store)
+        self.assertEqual(apps.job_description("dice_1"), "Java services")
+        self.assertEqual(apps.job_description("dice_missing"), "")
+
+
 class TestVerdictUndo(unittest.TestCase):
     def test_only_a_tracker_label_can_be_deleted(self):
         store = new_store()

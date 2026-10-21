@@ -320,6 +320,12 @@ class Applications:
             return None
         return {"title": row[0] or "", "company": row[1] or "", "description": row[2], "resume_id": row[3] or ""}
 
+    def job_description(self, job_id: str) -> str:
+        """A stored job's description by its id, for an alert's panel; "" when there is none."""
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT jd_text FROM jobs WHERE id = ?", (str(job_id),)).fetchone()
+        return (row[0] or "") if row else ""
+
     def description(self, app_id: int) -> str:
         """The stored job description, for preparing an interview after the posting is taken down."""
         with self.store.connect() as conn:
